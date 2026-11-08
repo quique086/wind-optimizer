@@ -65,6 +65,7 @@ a{color:var(--cy)}
 <div class="note">Coordinates: S3347.6W07047.1 · S33W070 · 3347.6S/07047.1W · -33.79,-70.78 · Name a fix with NAME/coords. Airports built in: <span id="aptlist"></span></div>
 <div class="grid">
 <div><label>Departure (UTC)</label><input id="dep" type="datetime-local"></div>
+<div><label>Aircraft</label><select id="actype"><option value="a320ceo">A320 CEO</option><option value="a320neo">A320 neo</option><option value="a321ceo">A321 CEO</option><option value="a321neo">A321 neo</option></select></div>
 <div><label>Cruise Mach</label><input id="mach" type="number" step="0.01" value="0.78"></div>
 <div><label>OPT FL, no wind</label><input id="opt" type="number" step="10" value="370"></div>
 <div><label>REC MAX FL</label><input id="recmax" type="number" step="10" value="390"></div>
@@ -188,12 +189,16 @@ function fmsProf(prof,lvls){return lvls.map(fl=>{const w=interpProf(prof,fl*100)
 function penaltyFn(p2,p4){const a=(p4-2*p2)/8/100,b=(p2/100-4*a)/2;return dk=>{const d=Math.abs(dk);return Math.max(0,a*d*d+b*d)}}
 /* generic A320 climb from brake release (mid weight, ISA, still air): FL -> [NM, min, kg] */
 const CLB=[[100,18,5,500],[200,45,11,850],[250,65,14,1000],[290,85,17,1150],[330,110,21,1350],[350,125,23,1450],[370,145,26,1600],[390,175,31,1800],[410,210,37,2050]];
-function climbOf(fl,cfg){const k=(cfg.clf||100)/100;let i=0;while(i<CLB.length-2&&fl>CLB[i+1][0])i++;const a=CLB[i],b=CLB[i+1],t=(fl-a[0])/(b[0]-a[0]);
- const L=j=>a[j]+t*(b[j]-a[j]);return{d:L(1)*k,t:L(2)*k/60,f:L(3)*k}}
-function descOf(fl){const k=fl/10;return{d:3.2*k+10,t:(0.45*k+6)/60,f:150+5*k}}
+/* generic type factors vs A320 CEO: climb dist/time, climb fuel, descent dist/time, descent fuel, typical cruise FF, OPT-vs-weight helper */
+const AC={a320ceo:{cd:1,cf:1,dd:1,df:1,ff:2400,w0:70},a320neo:{cd:1,cf:0.85,dd:1,df:0.9,ff:2100,w0:70},
+ a321ceo:{cd:1.15,cf:1.25,dd:1.05,df:1.1,ff:2750,w0:80},a321neo:{cd:1.15,cf:1.06,dd:1.05,df:1,ff:2400,w0:80}};
+function acOf(cfg){return AC[cfg.ac]||AC.a320ceo}
+function climbOf(fl,cfg){const k=(cfg.clf||100)/100,A=acOf(cfg);let i=0;while(i<CLB.length-2&&fl>CLB[i+1][0])i++;const a=CLB[i],b=CLB[i+1],t=(fl-a[0])/(b[0]-a[0]);
+ const L=j=>a[j]+t*(b[j]-a[j]);return{d:L(1)*k*A.cd,t:L(2)*k*A.cd/60,f:L(3)*k*A.cf}}
+function descOf(fl,cfg){const k=fl/10,A=acOf(cfg||{});return{d:(3.2*k+10)*A.dd,t:(0.45*k+6)*A.dd/60,f:(150+5*k)*A.df}}
 function evalLevels(cruise,flList,cfg,windSrc,trip){const pen=penaltyFn(cfg.p2,cfg.p4),TASstd=cfg.mach*573.57;
  return flList.map(fl=>{let time=0,fuel=0,dsum=0,tw=0,isa=0,tasS=0,lo=-1e9,hi=1e9,cl=null,de=null;
-  if(trip){cl=climbOf(fl,cfg);de=descOf(fl);lo=cl.d;hi=cfg.total-de.d;if(hi-lo<15)return{fl,bad:true}}
+  if(trip){cl=climbOf(fl,cfg);de=descOf(fl,cfg);lo=cl.d;hi=cfg.total-de.d;if(hi-lo<15)return{fl,bad:true}}
   for(const s of cruise){const d=trip?Math.max(0,Math.min(s.a1,hi)-Math.max(s.a0,lo)):s.seg;if(d<=0)continue;const prof=windSrc?windSrc(s):s.prof;const w=interpProf(prof,fl*100),t=s.trk*D2R;
    const along=w.u*Math.sin(t)+w.v*Math.cos(t),cross=w.u*Math.cos(t)-w.v*Math.sin(t);
    const tas=cfg.mach*38.967854*Math.sqrt(w.T+273.15),gs=Math.sqrt(Math.max(tas*tas-cross*cross,1))+along;
@@ -221,7 +226,7 @@ function windStr(w){const s=Math.hypot(w.u,w.v);let d=(Math.atan2(-w.u,-w.v)*R2D
  return String(d).padStart(3,"0")+"/"+String(Math.round(s)).padStart(3,"0")}
 function hm(h){const m=Math.round(h*60);return Math.floor(m/60)+":"+String(m%60).padStart(2,"0")}
 function sgn(x,dp=0){const v=x.toFixed(dp);return +v==0?(0).toFixed(dp):(x>0?"+":"")+v}
-function cfg(){const g=id=>parseFloat($(id).value);return{mach:g("mach"),opt:g("opt"),recmax:g("recmax"),minfl:g("minfl"),ff:g("ff"),clf:g("clf")||100,p2:g("p2"),p4:g("p4"),parity:$("parity").value,magvar:g("magvar")||0,mode:$("mode").value,
+function cfg(){const g=id=>parseFloat($(id).value);return{mach:g("mach"),opt:g("opt"),recmax:g("recmax"),minfl:g("minfl"),ff:g("ff"),clf:g("clf")||100,ac:$("actype").value,p2:g("p2"),p4:g("p4"),parity:$("parity").value,magvar:g("magvar")||0,mode:$("mode").value,
  mine:$("mine").value.split(/[\s,]+/).map(Number).filter(x=>x>=100&&x<=450).slice(0,4)}}
 function depDate(){const v=$("dep").value;return v?new Date(v+":00Z"):new Date()}
 
@@ -255,7 +260,7 @@ function render(P){const c=cfg(),S=P.samples;
  const tooHigh=all.filter(f=>show.includes(f)&&!res.find(r=>r.fl==f)&&f>c.minfl);
  const bestF=shown.reduce((a,b)=>b.fuel<a.fuel?b:a),bestT=shown.reduce((a,b)=>b.time<a.time?b:a);
  const ref=res.find(r=>r.fl==c.opt)||res.reduce((a,b)=>Math.abs(b.fl-c.opt)<Math.abs(a.fl-c.opt)?b:a),penF=penaltyFn(c.p2,c.p4);
- const bcl=climbOf(bestF.fl,c).d,bde=descOf(bestF.fl).d;
+ const bcl=climbOf(bestF.fl,c).d,bde=descOf(bestF.fl,c).d;
  let cruise=S.filter(s=>s.cum>=bcl&&s.cum<=P.total-bde);if(!cruise.length)cruise=[S[Math.floor(S.length/2)]];
  const optRow=shown.find(r=>r.fl==c.opt)||shown.reduce((a,b)=>Math.abs(b.fl-c.opt)<Math.abs(a.fl-c.opt)?b:a);
  
@@ -282,8 +287,8 @@ function render(P){const c=cfg(),S=P.samples;
 <p class="note">Trip ${Math.round(P.total)} NM · cruise at FL${bestF.fl} ≈${Math.round(bestF.cdist)} NM${tooHigh.length?" · too short for "+tooHigh.map(f=>"FL"+f).join(", "):""} · best picked from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3,"0")}°${c.parity=="auto"?"":" · forced"}). Grey rows are the other direction, shown for reference · fuel figures are relative estimates</p>
 <div class="scroll"><table><tr><th>FL</th><th>WIND</th><th>HAVE</th><th>NEED</th><th>ISA</th><th>GS</th><th>TIME</th><th>TRIP kg</th><th>Δ kg</th></tr>
 ${res.slice().reverse().map(r=>{const d=r.fuel-bestF.fuel,isRef=r.fl==ref.fl,have=r.tw-ref.tw,rem=ref.fuel-r.xf,need=rem>0?r.tw+(r.cfuel*r.cgs/rem-r.cgs)-ref.tw:NaN;return`<tr class="${r===bestF?"best":""} ${r.fl==c.opt?"opt":""} ${show.includes(r.fl)?"":"dim"}"><td>FL${r.fl}</td>
-<td style="color:${r.tw>=0?"var(--acc)":"var(--rd)"}">${sgn(r.tw)}</td><td>${isRef?"ref":sgn(have)}</td><td style="color:${isRef?"inherit":have>=need?"var(--acc)":"var(--mut)"}">${isRef?"—":isFinite(need)?sgn(need):"n/a"}</td><td>${sgn(r.isa)}</td><td>${Math.round(r.gs)}</td><td>${hm(r.time)}</td><td>${Math.round(r.fuel)}</td><td>${d<0.5?"best":"+"+Math.round(d)}</td></tr>`}).join("")}
-</table></div><div class="note">WIND = average tail(+)/head(−) component over the cruise portion. HAVE = how much better (+) or worse (−) the wind is than at your OPT. NEED = how much better it must be to pay for flying off OPT. A level beats OPT only when HAVE ≥ NEED (green). TRIP = climb + cruise + descent, so a lower level gets credit for the shorter climb and a higher level for the longer, cheap descent. Climb and descent use generic A320 figures, adjustable with "Climb table scale".<br><b>Use the no-wind OPT</b>, read from PROG before entering winds. The FMS OPT after winds are entered already includes them, so the wind would be counted twice.</div></div>
+<td style="color:${r.tw>=0?"var(--acc)":"var(--rd)"}">${sgn(r.tw)}</td><td>${isRef?"ref":sgn(have)}</td><td style="color:${isRef?"inherit":have>=need?"var(--acc)":"var(--mut)"}">${isRef?"—":isFinite(need)?sgn(need):"n/a"}</td><td>${sgn(r.isa)}</td><td>${Math.round(r.gs)}</td><td>${hm(r.time)}</td><td>${Math.round(r.fuel)}</td><td>${r===bestF?"best":d<0?"−"+Math.round(-d):"+"+Math.round(d)}</td></tr>`}).join("")}
+</table></div><div class="note">WIND = average tail(+)/head(−) component over the cruise portion. HAVE = how much better (+) or worse (−) the wind is than at your OPT. NEED = how much better it must be to pay for flying off OPT. A level beats OPT only when HAVE ≥ NEED (green). TRIP = climb + cruise + descent, so a lower level gets credit for the shorter climb and a higher level for the longer, cheap descent. Climb and descent use generic figures for the selected aircraft, adjustable with "Climb table scale".<br><b>Use the no-wind OPT</b>, read from PROG before entering winds. The FMS OPT after winds are entered already includes them, so the wind would be counted twice.</div></div>
 
 ${c.mode=="datalink"?datalinkHtml(P,cruise,all,show,c,shown,bestF,mineHtml,pick,band):`<div class="card"><h2>3 · Enter these winds in the FMS</h2>
 <div>${lv.map(f=>`<span class="pill">FL${f}</span>`).join("")}</div>
@@ -338,17 +343,18 @@ ${mn?`<path d="${path(mn)}" fill="none" stroke="#f85149" stroke-width="1.5" stro
 <div class="note"><span style="color:#3fb950">━</span> forecast tail(+)/head(−) wind ${lv?` · <span style="color:#39c5cf">╌</span> what FMS sees with recommended levels`:""}${mn?` · <span style="color:#f85149">┈</span> with your levels`:""}</div>`}
 
 /* ---------- inputs persistence ---------- */
-const IDS=["mode","route","dep","mach","opt","recmax","minfl","parity","gw","ff","clf","magvar","p2","p4","mine"];
+const IDS=["actype","mode","route","dep","mach","opt","recmax","minfl","parity","gw","ff","clf","magvar","p2","p4","mine"];
 function saveInputs(){const o={};IDS.forEach(i=>o[i]=$(i).value);store("optfl.in",o)}
 (function init(){const o=load("optfl.in");if(o)IDS.forEach(i=>{if(o[i]!=null&&o[i]!=="")$(i).value=o[i]});
  if(!$("dep").value){const d=new Date(Date.now()+3600e3);d.setUTCMinutes(0,0,0);$("dep").value=d.toISOString().slice(0,16)}})();
 
 $("gw").addEventListener("change",()=>{const w=parseFloat($("gw").value);if(!(w>40))return;
- let f=350+(70-w)*3.3;f=Math.max(290,Math.min(398,f));$("opt").value=Math.round(f/10)*10})
+ let f=350+(AC[$("actype").value].w0-w)*3.3;f=Math.max(290,Math.min(398,f));$("opt").value=Math.round(f/10)*10})
 function setMode(m){$("mode").value=m;document.querySelectorAll(".segb").forEach(b=>b.classList.toggle("on",b.dataset.m==m));
  $("mineLbl").textContent=m=="datalink"?"Levels you usually request in the uplink (to compare)":"Levels you normally enter (to compare)";
  if(STATE&&STATE.json)try{render(STATE.P)}catch(e){} saveInputs()}
 document.querySelectorAll(".segb").forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+$("actype").addEventListener("change",()=>{$("ff").value=AC[$("actype").value].ff;saveInputs();if(STATE&&STATE.json)try{render(STATE.P)}catch(e){}});
 $("go").onclick=go;
 $("usepaste").onclick=()=>{if(!STATE)return;let j;try{j=JSON.parse($("pj").value.trim())}catch(e){$("m1").className="msg err";$("m1").textContent="That doesn't look like the forecast data. Copy the whole page.";return}
  $("paste").style.display="none";finish(STATE.P,j)};

@@ -115,15 +115,15 @@ function sim(S,c,path,opt={}){const src=opt.src||(s=>s.prof),pen=penaltyFn(c.p2,
    const ff=c.ff*cal*(w/wmid),f=ff*(1+pen((fl-flAtWeight(c.opt,w,c))/10))*(tas/TASstd)*hrs;
    time+=hrs;fuel+=f;w-=f;dsum+=d;tw+=al*d;isa+=(W.T-isaT(fl*100))*d;tasS+=tas*d}
   wts.push({cum:s.cum,w});
-  if(s.user&&s.name)chk[s.name]=cl.f*cal+fuel+(s.cum>=hi?de.f*cal:0)}
+  if(s.user&&s.name)chk[s.name]=s.cum<lo?cl.f*cal*Math.sqrt(Math.max(0,s.cum)/lo):cl.f*cal+fuel+(s.cum>hi?de.f*cal*(s.cum-hi)/Math.max(1,c.total-hi):0)}
  if(!dsum)return{fl:L0,bad:true,why:"short"};
  const xf=(cl.f+de.f)*cal,xt=cl.t+de.t,T=time+xt,F=fuel+xf;
  return{fl:L0,fuel:F,time:T,cost:F+c.ci*T*60,cfuel:fuel,ctime:time,cgs:dsum/time,cdist:dsum,xf,tw:tw/dsum,isa:isa/dsum,tas:tasS/dsum,lo,hi,over,steps,chk,wts,wc,wd,cl,de}}
 const constPath=L=>({L0:L,at:()=>L});
 /* path from "340 360/ASEPU" style text, using route waypoint distances */
 function pathFromSpec(spec,S){const toks=spec.toUpperCase().trim().split(/\s+/).filter(Boolean);if(!toks.length)return null;
- const L0=parseInt(toks[0]);if(!(L0>=100))return null;const ch=[];
- for(const t of toks.slice(1)){const[fl,fx]=t.split("/");const s=S.find(q=>q.name==fx);if(!s||!(+fl>=100))return{err:t};ch.push({at:s.cum,fl:+fl})}
+ const L0=parseInt(toks[0].replace(/^FL/,""));if(!(L0>=100))return null;const ch=[];
+ for(const t of toks.slice(1)){const[fl,fx]=t.replace(/^FL/,"").split("/");const s=S.find(q=>q.name==fx);if(!s||!(+fl>=100))return{err:t};ch.push({at:s.cum,fl:+fl})}
  ch.sort((a,b)=>a.at-b.at);return{L0,at:x=>{let f=L0;for(const q of ch)if(x>=q.at)f=q.fl;return f}}}
 /* OFP planned profile -> cruise level changes at fixes (T/C, steady levels, T/D) */
 function ofpChanges(levels){const out=[];let cur=null,lastFix=null;
@@ -169,10 +169,14 @@ function stepPlan(S,c,base,levels){
  const n=segs.length,cost=segs.map(sg=>levels.map(L=>segCost(sg,L)));
  const ends=L=>{const cl=climbOf(L,c),de=descOf(L,c);return(cl.f+de.f)*c.cal+c.ci*(cl.t+de.t)*60};
  const dp=[],bk=[];
- dp[0]=levels.map((L,j)=>cost[0][j]==null?Infinity:cost[0][j]+(climbOf(L,c).f*c.cal+c.ci*climbOf(L,c).t*60));
+ /* a lower first level ends its climb earlier: charge the extra cruise it flies (same for a shorter descent at the end) */
+ const len0=segs[0].b-segs[0].a,lenN=segs[n-1].b-segs[n-1].a,cb=climbOf(base.fl,c),db=descOf(base.fl,c);
+ const climbC=(L,j)=>{const cl=climbOf(L,c);return cl.f*c.cal+c.ci*cl.t*60+(cb.d-cl.d)*cost[0][j]/len0};
+ const descC=(L,j)=>{const de=descOf(L,c);return de.f*c.cal+c.ci*de.t*60+(db.d-de.d)*cost[n-1][j]/lenN};
+ dp[0]=levels.map((L,j)=>cost[0][j]==null?Infinity:cost[0][j]+climbC(L,j));
  for(let k=1;k<n;k++){dp[k]=[];bk[k]=[];levels.forEach((L,j)=>{dp[k][j]=Infinity;if(cost[k][j]==null)return;
    levels.forEach((P,i)=>{if(dp[k-1][i]===Infinity)return;const tr=L>P?c.stepc*(L-P)/10*c.cal:(L<P?5:0);const v=dp[k-1][i]+tr+cost[k][j];if(v<dp[k][j]){dp[k][j]=v;bk[k][j]=i}})})}
- const fin=levels.map((L,j)=>dp[n-1][j]+descOf(L,c).f*c.cal+c.ci*descOf(L,c).t*60);
+ const fin=levels.map((L,j)=>cost[n-1][j]==null?Infinity:dp[n-1][j]+descC(L,j));
  let j=fin.indexOf(Math.min(...fin));if(!isFinite(fin[j]))return null;const pick=[];for(let k=n-1;k>=0;k--){pick[k]=levels[j];if(k>0)j=bk[k][j]}
  const bi=levels.indexOf(base.fl);let constC=null;
  if(bi>=0&&cost.every(r=>r[bi]!=null))constC=cost.reduce((a,r)=>a+r[bi],0)+ends(base.fl);
@@ -183,6 +187,7 @@ function stepPlan(S,c,base,levels){
 function windStr(w){const s=Math.hypot(w.u,w.v);let d=(Math.atan2(-w.u,-w.v)*R2D+360)%360;d=Math.round(d)%360||360;return String(d).padStart(3,"0")+"/"+String(Math.round(s)).padStart(3,"0")}
 function hm(h){const m=Math.round(h*60);return Math.floor(m/60)+":"+String(m%60).padStart(2,"0")}
 function sgn(x,dp=0){const v=x.toFixed(dp);return +v==0?(0).toFixed(dp):(x>0?"+":"")+v}
+function kgs(x){return(x>=0?"+":"−")+kg(Math.abs(x))}
 function kg(x){return Math.round(x).toLocaleString("en-US")}
 function vecAvg(S,s0,s1,ft){let u=0,v=0,n=0;for(const s of S){if(s.cum<s0-1||s.cum>s1+1)continue;const w=interpProf(s.prof,ft);u+=w.u;v+=w.v;n++}return n?{u:u/n,v:v/n}:null}
 
@@ -244,16 +249,17 @@ function render(P){const c=cfg(),S=P.samples;c.total=P.total;useModel(S,c.model)
  if(c.mine.length>=2){const lv=c.mine.slice().sort((a,b)=>a-b);const src=s=>fmsProf(s.prof,lv);
   const perc=all.filter(isDir).map(f=>sim(S,c,constPath(f),{src})).filter(r=>!r.bad);
   if(perc.length){const pb=perc.reduce((a,b)=>key(b)<key(a)?b:a),trueAt=shown.find(r=>r.fl==pb.fl)||bestF;
-   mineHtml=`<p style="font-size:13px">With winds ${c.mode=="datalink"?"uplinked":"entered"} only at <b>${lv.map(f=>"FL"+f).join(" ")}</b>, the FMS sees a best of <b>FL${pb.fl}</b>. Errors reach ${profErr(cruise,band,lv).toFixed(0)} kt in your band.${pb.fl!=bestF.fl?` With the real profile the best is <b>FL${bestF.fl}</b>. Flying FL${pb.fl} costs ≈${kg(trueAt.fuel-bestF.fuel)} kg and ${sgn((trueAt.time-bestF.time)*60)} min.`:" Same answer as the real profile."}</p>`}}
+   mineHtml=`<p style="font-size:13px">With winds ${c.mode=="datalink"?"uplinked":"entered"} only at <b>${lv.map(f=>"FL"+f).join(" ")}</b>, the FMS sees a best of <b>FL${pb.fl}</b>. Errors reach ${profErr(cruise,band,lv).toFixed(0)} kt in your band.${pb.fl!=bestF.fl?` With the real profile the best is <b>FL${bestF.fl}</b>. Flying FL${pb.fl} means ${kgs(trueAt.fuel-bestF.fuel)} kg and ${sgn((trueAt.time-bestF.time)*60)} min.`:" Same answer as the real profile."}</p>`}}
  /* step plan */
- const dirLv=all.filter(f=>isDir(f));const sp=stepPlan(S,c,bestF,dirLv);
+ const wLand=c.tow*1000-bestF.fuel,topFL=Math.min(390,Math.floor(flAtWeight(c.recmax,wLand,c)/10)*10),dirLv=[];
+ for(let f=c.minfl;f<=Math.max(topFL,c.recmax);f+=10)if(isDir(f))dirLv.push(f);const sp=stepPlan(S,c,bestF,dirLv);
  let stepHtml="";
- if(sp){const changes=[];sp.pick.forEach((L,k)=>{if(k==0||L!=sp.pick[k-1])changes.push({k,L})});
+ if(sp&&bestF.cdist>=250){const changes=[];sp.pick.forEach((L,k)=>{if(k==0||L!=sp.pick[k-1])changes.push({k,L})});
   const worth=sp.saving!=null&&sp.saving>=c.minstep&&changes.length>1;
   stepHtml=`<div class="card"><h2>Step plan</h2>${worth?`<div class="scroll"><table><tr><th>WHERE</th><th>LEVEL</th><th>UNTIL</th></tr>
 ${changes.map((q,i)=>{const nx=changes[i+1];return`<tr class="${i>0?"best":""}"><td>${i==0?"Initial":"At "+sp.segs[q.k].name}</td><td>FL${q.L}</td><td>${nx?sp.segs[nx.k].name:"T/D"}</td></tr>`}).join("")}</table></div>
 <p style="font-size:13px">Saves ≈<b>${kg(sp.saving)} kg</b>${c.ci?" (cost units)":""} against FL${bestF.fl} all the way, after ${c.stepc} kg per 1000 ft of step climb.</p>`
-  :`<p style="font-size:13px">No step worth requesting: <b>FL${bestF.fl}</b> all the way${sp.saving!=null&&sp.saving>0?` (best step plan saves only ${kg(sp.saving)} kg)`:""}.</p>`}
+  :`<p style="font-size:13px">No step worth requesting: <b>FL${bestF.fl}</b> all the way${changes.length>1&&sp.saving!=null&&sp.saving>0?` (best step plan saves only ${kg(sp.saving)} kg)`:""}.</p>`}
 <p class="note">Steps can only happen at route fixes. OPT and REC MAX rise as fuel burns (constant weight/pressure ratio). The minimum saving is in More settings.</p></div>`}
  /* OFP comparison */
  let ofpHtml="";const OF=load("optfl.ofp");
@@ -276,8 +282,8 @@ ${changes.map((q,i)=>{const nx=changes[i+1];return`<tr class="${i>0?"best":""}">
 ${mineHtml||`<p class="note">Type the 4 levels you usually request above to see what they would do to the FMS OPT.</p>`}</div>
 <div class="card"><details><summary style="font-size:14px;color:var(--am);font-weight:700">ALSO: FL TO REQUEST FROM ATC</summary>
 <div class="scroll"><table><tr><th>#</th><th>FL</th><th>FUEL</th><th>TIME</th><th>WIND</th></tr>
-${top.map((a,i)=>`<tr class="${i==0?"best":""}"><td>${i+1}</td><td>FL${a.fl}</td><td>${i==0?"best":"+"+kg(a.fuel-bestF.fuel)+" kg"}</td><td>${i==0?hm(a.time):sgn((a.time-bestF.time)*60)+" min"}</td><td>${sgn(a.tw)} kt</td></tr>`).join("")}</table></div>
-${bestT.fl!=bestF.fl?`<p style="font-size:13px">If you're late, <b>FL${bestT.fl}</b> is fastest: ${Math.round((bestF.time-bestT.time)*60)} min saved for +${kg(bestT.fuel-bestF.fuel)} kg.</p>`:""}</details></div>`
+${top.map((a,i)=>`<tr class="${i==0?"best":""}"><td>${i+1}</td><td>FL${a.fl}</td><td>${i==0?"best":(a.fuel>=bestF.fuel?"+":"−")+kg(Math.abs(a.fuel-bestF.fuel))+" kg"}</td><td>${i==0?hm(a.time):sgn((a.time-bestF.time)*60)+" min"}</td><td>${sgn(a.tw)} kt</td></tr>`).join("")}</table></div>
+${bestT.fl!=bestF.fl?`<p style="font-size:13px">If you're late, <b>FL${bestT.fl}</b> is fastest: ${Math.round((bestF.time-bestT.time)*60)} min saved for ${kgs(bestT.fuel-bestF.fuel)} kg.</p>`:""}</details></div>`
  :`<div class="card"><h2>3 · Enter these winds in the FMS</h2><div>${lv.map(f=>`<span class="pill">FL${f}</span>`).join("")}</div>
 <p class="note">These 4 levels let the FMS's interpolation match the forecast profile from FL${band[0]} to FL${band[band.length-1]} within ≈${pick.e.toFixed(0)} kt.</p>
 <div class="scroll"><table><tr><th>WPT</th>${lv.map(f=>`<th>FL${f}</th>`).join("")}</tr>${wpRows}</table></div>
@@ -288,7 +294,7 @@ ${wps.length?"":`<p class="note">No en-route fixes in the cruise portion: enter 
 <div class="row" style="justify-content:space-between"><div><div class="note">Best level${c.ci?" (CI "+c.ci+")":" (fuel)"}</div><div class="big">FL${bestF.fl}</div></div>
 <div><div class="note">Fastest</div><div class="big" style="color:var(--cy)">FL${bestT.fl}</div></div>
 <div><div class="note">vs FL${ref.fl} (no-wind OPT)</div><div class="big" style="color:${save>0?"var(--acc)":"var(--mut)"}">${save>0.5?"−"+kg(save)+" kg":"—"}</div><div class="note">${Math.abs(tsave)<0.5?"same time":(tsave>0?Math.round(tsave)+" min faster":Math.round(-tsave)+" min slower")}</div></div></div>
-<p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${c.model=="AVG"?"GFS+ECMWF average":c.model} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3,"0")}°). Grey rows are the other direction${tooHigh.length?" · too short for "+tooHigh.map(f=>"FL"+f).join(", "):""}${c.cal!=1?` · fuel calibrated ×${c.cal.toFixed(3)}`:""}</p>
+<p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${c.model=="AVG"?(STATE.info&&STATE.info.models.length>1?"GFS+ECMWF average":(STATE.info?STATE.info.models.join(""):"")):c.model} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3,"0")}°). Grey rows are the other direction${tooHigh.length?" · too short for "+tooHigh.map(f=>"FL"+f).join(", "):""}${c.cal!=1?` · fuel calibrated ×${c.cal.toFixed(3)}`:""}</p>
 ${agree}${age}
 <div class="scroll"><table><tr><th>FL</th><th>WIND</th><th>HAVE</th><th>NEED</th>${c.ci?"":"<th>ISA</th>"}<th>GS</th><th>TIME</th><th>TRIP kg</th>${c.ci?"<th>COST</th>":""}<th>Δ</th></tr>
 ${res.slice().reverse().map(r=>{const d=key(r)-key(bestF),isRef=r===ref,have=r.tw-ref.tw,rem=ref.fuel-r.xf,need=rem>0?r.tw+(r.cfuel*r.cgs/rem-r.cgs)-ref.tw:NaN;

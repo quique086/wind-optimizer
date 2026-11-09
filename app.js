@@ -109,7 +109,7 @@ function sim(S,c,path,opt={}){const src=opt.src||(s=>s.prof),pen=penaltyFn(c.p2,
  for(const s of S){const d=Math.max(0,Math.min(s.a1,hi)-Math.max(s.a0,lo));
   if(d>0){const fl=path.at(s.cum);
    if(prev!==null&&fl!==prev){if(fl>prev){const sf=c.stepc*(fl-prev)/10*cal;fuel+=sf;w-=sf}steps++}prev=fl;
-   if(fl>flAtWeight(c.recmax,w,c)+0.5)over=true;
+   if(fl>flAtWeight(c.recmax,w,c)-c.recm/100+0.5)over=true;
    const W=interpProf(src(s),fl*100),t=s.trk*D2R,al=W.u*Math.sin(t)+W.v*Math.cos(t),cr=W.u*Math.cos(t)-W.v*Math.sin(t);
    const tas=c.mach*38.967854*Math.sqrt(W.T+273.15),gs=Math.sqrt(Math.max(tas*tas-cr*cr,1))+al,hrs=d/Math.max(gs,150);
    const ff=c.ff*cal*(w/wmid),f=ff*(1+pen((fl-flAtWeight(c.opt,w,c))/10))*(tas/TASstd)*hrs;
@@ -160,7 +160,7 @@ function stepPlan(S,c,base,levels){
    segs.splice(lo,2,{a:segs[lo].a,b:segs[hi].b,name:segs[lo].name});i=-1}}
  const wAt=x=>{let w=base.wts[0].w;for(const q of base.wts)if(q.cum<=x)w=q.w;return w};
  const pen=penaltyFn(c.p2,c.p4),TASstd=c.mach*573.57,wmid=c.tow*1000-0.5*c.ff*(c.total/450);
- const segCost=(sg,L)=>{let w=wAt(sg.a),F=0,T=0;if(L>flAtWeight(c.recmax,w,c)+0.5)return null;
+ const segCost=(sg,L)=>{let w=wAt(sg.a),F=0,T=0;if(L>flAtWeight(c.recmax,w,c)-c.recm/100+0.5)return null;
   for(const s of S){const d=Math.max(0,Math.min(s.a1,sg.b)-Math.max(s.a0,sg.a));if(d<=0)continue;
    const W=interpProf(s.prof,L*100),t=s.trk*D2R,al=W.u*Math.sin(t)+W.v*Math.cos(t),cr=W.u*Math.cos(t)-W.v*Math.sin(t);
    const tas=c.mach*38.967854*Math.sqrt(W.T+273.15),gs=Math.sqrt(Math.max(tas*tas-cr*cr,1))+al,h=d/Math.max(gs,150);
@@ -192,13 +192,13 @@ function kg(x){return Math.round(x).toLocaleString("en-US")}
 function vecAvg(S,s0,s1,ft){let u=0,v=0,n=0;for(const s of S){if(s.cum<s0-1||s.cum>s1+1)continue;const w=interpProf(s.prof,ft);u+=w.u;v+=w.v;n++}return n?{u:u/n,v:v/n}:null}
 
 /* ============================== inputs ============================== */
-const IDS=["actype","mode","route","dep","tow","mach","ci","opt","recmax","minfl","model","parity","ff","clf","magvar","p2","p4","stepc","minstep","mine","pf_tof","pf_ldf","pf_to","pf_ldg","pf_lv","pf_pts"];
+const IDS=["actype","mode","route","dep","tow","mach","ci","opt","recmax","recm","minfl","model","parity","ff","clf","magvar","p2","p4","stepc","minstep","mine","pf_tof","pf_ldf","pf_to","pf_ldg","pf_lv","pf_pts"];
 function saveInputs(){const o={};IDS.forEach(i=>o[i]=$(i).value);o.autocal=$("autocal").checked;store("optfl.in",o)}
 function calOf(ac){if(!$("autocal").checked)return 1;const h=(load("optfl.hist")||[]).filter(e=>e.ac==ac&&e.ratio>0.7&&e.ratio<1.3).slice(-10).map(e=>e.ratio).sort((a,b)=>a-b);
  if(!h.length)return 1;const m=h.length%2?h[(h.length-1)/2]:(h[h.length/2-1]+h[h.length/2])/2;return Math.min(1.15,Math.max(0.85,m))}
 function cfg(){const g=id=>parseFloat($(id).value);const ac=$("actype").value;
  return{ac,mach:g("mach")||0.78,ci:g("ci")||0,tow:g("tow")||AC[ac].w,opt:g("opt"),recmax:g("recmax"),minfl:g("minfl"),ff:g("ff"),clf:g("clf")||100,p2:g("p2"),p4:g("p4"),
-  stepc:isFinite(g("stepc"))?g("stepc"):25,minstep:isFinite(g("minstep"))?g("minstep"):40,parity:$("parity").value,mode:$("mode").value,magvar:g("magvar")||0,model:$("model").value,cal:calOf(ac),
+  recm:isFinite(g("recm"))?Math.max(0,g("recm")):2000,stepc:isFinite(g("stepc"))?g("stepc"):25,minstep:isFinite(g("minstep"))?g("minstep"):40,parity:$("parity").value,mode:$("mode").value,magvar:g("magvar")||0,model:$("model").value,cal:calOf(ac),
   mine:$("mine").value.split(/[\s,]+/).map(Number).filter(x=>x>=100&&x<=450).slice(0,4)}}
 function depDate(){const v=$("dep").value;return v?new Date(v+":00Z"):new Date()}
 
@@ -231,7 +231,7 @@ function render(P){const c=cfg(),S=P.samples;c.total=P.total;useModel(S,c.model)
  const res=all.map(f=>sim(S,c,constPath(f))).filter(r=>!r.bad);
  const shown=res.filter(r=>isDir(r.fl));
  if(!shown.length){$("out").innerHTML='<div class="card err">No level fits: route too short for these levels, or check Lowest FL / REC MAX.</div>';return}
- const key=r=>r.cost,bestF=shown.reduce((a,b)=>key(b)<key(a)?b:a),bestT=shown.reduce((a,b)=>b.time<a.time?b:a);
+ const key=r=>r.cost,okLv=shown.filter(r=>!r.over),bestAny=shown.reduce((a,b)=>key(b)<key(a)?b:a),bestF=okLv.length?okLv.reduce((a,b)=>key(b)<key(a)?b:a):bestAny,bestT=shown.reduce((a,b)=>b.time<a.time?b:a);
  let cruise=S.filter(s=>s.cum>=bestF.lo&&s.cum<=bestF.hi);if(!cruise.length)cruise=[S[Math.floor(S.length/2)]];
  const ref=res.find(r=>r.fl==c.opt)||res.reduce((a,b)=>Math.abs(b.fl-c.opt)<Math.abs(a.fl-c.opt)?b:a);
  const tooHigh=all.filter(f=>isDir(f)&&!res.find(r=>r.fl==f));
@@ -261,6 +261,23 @@ ${changes.map((q,i)=>{const nx=changes[i+1];return`<tr class="${i>0?"best":""}">
 <p style="font-size:13px">Saves ≈<b>${kg(sp.saving)} kg</b>${c.ci?" (cost units)":""} against FL${bestF.fl} all the way, after ${c.stepc} kg per 1000 ft of step climb.</p>`
   :`<p style="font-size:13px">No step worth requesting: <b>FL${bestF.fl}</b> all the way${changes.length>1&&sp.saving!=null&&sp.saving>0?` (best step plan saves only ${kg(sp.saving)} kg)`:""}.</p>`}
 <p class="note">Steps can only happen at route fixes. OPT and REC MAX rise as fuel burns (constant weight/pressure ratio). The minimum saving is in More settings.</p></div>`}
+ /* recommended profile, hazards, chart */
+ const showPlan=sp&&bestF.cdist>=250&&sp.saving!=null&&sp.saving>=c.minstep&&sp.pick.some((L,k)=>k&&L!=sp.pick[k-1]);
+ const recPath=showPlan?pathFromPlan(sp,bestF):constPath(bestF.fl),recSim=showPlan?sim(S,c,recPath):bestF;
+ const HZ=recSim.bad?[]:hazards(S,c,recPath,recSim.lo,recSim.hi,recSim.wts),OFd=load("optfl.ofp"),sr=OFd&&OFd.route==P.route?OFd.sr||{}:{};
+ /* the margin only matters where the profile is close to REC MAX */
+ const near=HZ.filter(h=>h.room<4500),recM=near.length?Math.max(...near.map(h=>h.marg)):1000,worst=HZ.length?HZ.reduce((a,b)=>b.lv>a.lv||(b.lv==a.lv&&b.vws>a.vws)?b:a):null,
+  worstNear=near.length?near.reduce((a,b)=>b.marg>a.marg?b:a):null;
+ const ofpP=OFd&&OFd.route==P.route?pathFromOFP(OFd.levels,S):null,ofpS=ofpP?sim(S,c,ofpP):null;
+ const hzRows=HZ.filter(h=>h.s.user&&h.s.name).map(h=>`<tr><td>${h.s.name}</td><td>FL${h.fl}</td><td>${windStr(h.W)}</td><td style="color:${h.vws>=5?RCOL[2]:h.vws>=3?RCOL[1]:"inherit"}">${h.vws.toFixed(1)}</td>${Object.keys(sr).length?`<td>${sr[h.s.name]??"—"}</td>`:""}<td>${Math.round(h.hws)}</td><td>${h.dT.toFixed(1)}</td><td style="color:${h.spd?RCOL[2]:"inherit"}">${Math.abs(h.dWa)<1?"0":(h.dWa>0?"↓":"↑")+Math.round(Math.abs(h.dWa))}</td><td style="color:${RCOL[h.lv]}">${RISK[h.lv]}</td><td style="color:${h.room<h.marg?"var(--rd)":"inherit"}">${Math.round(h.room/100)*100}</td><td>${h.marg}</td></tr>`).join("");
+ const hzHtml=`<div class="card"><h2>Vertical profile</h2>${recSim.bad?"":profileChart(S,c,recSim,recPath,HZ,ofpP,ofpS)}</div>
+<div class="card"><h2>Route hazards &amp; REC MAX margin</h2>
+<div class="row" style="justify-content:space-between"><div><div class="note">Recommended margin</div><div class="big" style="color:${RCOL[RMARG.indexOf(Math.min(recM,4000))]||"var(--acc)"}">${recM} ft</div></div>
+<div><div class="note">Your margin</div><div class="big" style="color:var(--cy)">${c.recm} ft</div></div>${recM!=c.recm?`<button class="sec" id="userec">Use ${recM} ft</button>`:""}</div>
+<p style="font-size:13px">${worstNear&&worstNear.marg>1000?`Margin set by <b>${worstNear.s.name||Math.round(worstNear.s.cum)+" NM"}</b> (FL${worstNear.fl}, ${Math.round(worstNear.room)} ft below REC MAX): ${worstNear.why.join(", ")}.`:near.length?"No significant signals where you're close to REC MAX.":"The profile stays more than 4500 ft below REC MAX, so the minimum margin is enough."}
+${worst&&worst.lv&&worst!==worstNear?` Highest risk on the route: <b>${worst.s.name||Math.round(worst.s.cum)+" NM"}</b>, ${RISK[worst.lv].toLowerCase()} (${worst.why.join(", ")}), where you're ${Math.round(worst.room)} ft below REC MAX.`:""}</p>
+<div class="scroll"><table><tr><th>WPT</th><th>FL</th><th>WIND</th><th>VWS</th>${Object.keys(sr).length?"<th>OFP SR</th>":""}<th>HWS</th><th>ΔT</th><th>SPD</th><th>RISK</th><th>ROOM</th><th>MARG</th></tr>${hzRows||`<tr><td colspan="9">No fixes in the cruise portion.</td></tr>`}</table></div>
+<p class="note">At the recommended level. VWS = vertical wind shear, kt per 1000 ft (±2000 ft). HWS = horizontal shear along the route, kt per 150 NM. ΔT = temperature change, °C per 100 NM. SPD = along-track wind change per 50 NM: ↓ means tailwind increasing / headwind dropping, so speed decays; ↑ means headwind increasing, so speed rises towards MMO (margin ≈${HZ.length?Math.round(HZ[0].mmoKt):"?"} kt at M${c.mach}). Risk thresholds: FAA AC 00-30C (moderate CAT likely with VWS ≥ 5 kt/1000 ft, HWS ≥ 40 kt/150 NM, jet ≥ 110 kt) and WMO (VWS ≥ 9 kt/1000 ft moderate-to-severe; ΔT ≥ 5 °C/100 NM). ROOM = ft below REC MAX for the weight there (red if less than the suggested margin). The recommended margin only counts points within 4500 ft of REC MAX, where it can bind. Margin: 1000 ft with no signal, 2000 light, 3000 moderate, 4000 moderate-to-severe, +1000 ft for large speed changes. This is a rule of thumb from model data with levels 3000–5000 ft apart. It doesn't see mountain waves or convection: use it alongside SIGWX charts, PIREPs and company policy.</p></div>`;
  /* OFP comparison */
  let ofpHtml="";const OF=load("optfl.ofp");
  if(OF&&OF.route==P.route&&OF.levels){const op=pathFromOFP(OF.levels,S);if(op){const r=sim(S,c,op);if(!r.bad){const d=r.fuel-bestF.fuel;
@@ -295,20 +312,22 @@ ${wps.length?"":`<p class="note">No en-route fixes in the cruise portion: enter 
 <div><div class="note">Fastest</div><div class="big" style="color:var(--cy)">FL${bestT.fl}</div></div>
 <div><div class="note">vs FL${ref.fl} (no-wind OPT)</div><div class="big" style="color:${save>0?"var(--acc)":"var(--mut)"}">${save>0.5?"−"+kg(save)+" kg":"—"}</div><div class="note">${Math.abs(tsave)<0.5?"same time":(tsave>0?Math.round(tsave)+" min faster":Math.round(-tsave)+" min slower")}</div></div></div>
 <p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${c.model=="AVG"?(STATE.info&&STATE.info.models.length>1?"GFS+ECMWF average":(STATE.info?STATE.info.models.join(""):"")):c.model} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3,"0")}°). Grey rows are the other direction${tooHigh.length?" · too short for "+tooHigh.map(f=>"FL"+f).join(", "):""}${c.cal!=1?` · fuel calibrated ×${c.cal.toFixed(3)}`:""}</p>
-${agree}${age}
+${bestAny!==bestF?`<p class="note" style="font-size:12px">The REC MAX margin keeps you off FL${bestAny.fl} as a constant level: it costs ≈${kg(bestF.fuel-bestAny.fuel)} kg${c.ci?" (fuel)":""}. The step plan below shows when the margin allows a higher level.</p>`:""}${agree}${age}
 <div class="scroll"><table><tr><th>FL</th><th>WIND</th><th>HAVE</th><th>NEED</th>${c.ci?"":"<th>ISA</th>"}<th>GS</th><th>TIME</th><th>TRIP kg</th>${c.ci?"<th>COST</th>":""}<th>Δ</th></tr>
 ${res.slice().reverse().map(r=>{const d=key(r)-key(bestF),isRef=r===ref,have=r.tw-ref.tw,rem=ref.fuel-r.xf,need=rem>0?r.tw+(r.cfuel*r.cgs/rem-r.cgs)-ref.tw:NaN;
  return`<tr class="${r===bestF?"best":""} ${r.fl==c.opt?"opt":""} ${isDir(r.fl)?"":"dim"}"><td>FL${r.fl}${r.over?"*":""}</td>
 <td style="color:${r.tw>=0?"var(--acc)":"var(--rd)"}">${sgn(r.tw)}</td><td>${isRef?"ref":sgn(have)}</td><td style="color:${isRef?"inherit":have>=need?"var(--acc)":"var(--mut)"}">${isRef?"—":isFinite(need)?sgn(need):"n/a"}</td>
 ${c.ci?"":`<td>${sgn(r.isa)}</td>`}<td>${Math.round(r.cgs)}</td><td>${hm(r.time)}</td><td>${kg(r.fuel)}</td>${c.ci?`<td>${kg(r.cost)}</td>`:""}<td>${r===bestF?"best":d<0?"−"+kg(-d):"+"+kg(d)}</td></tr>`}).join("")}
 </table></div>
-<div class="note">WIND = average tail(+)/head(−) over the cruise. HAVE = wind gain vs your OPT; NEED = gain required to pay for leaving OPT (green when HAVE ≥ NEED). TRIP = climb + cruise + descent, with weight-based OPT.${c.ci?" COST = fuel + CI × minutes (kg).":""} * = above REC MAX at the start of cruise.</div>
+<div class="note">WIND = average tail(+)/head(−) over the cruise. HAVE = wind gain vs your OPT; NEED = gain required to pay for leaving OPT (green when HAVE ≥ NEED). TRIP = climb + cruise + descent, with weight-based OPT.${c.ci?" COST = fuel + CI × minutes (kg).":""} * = inside the ${kg(c.recm)} ft REC MAX margin somewhere in the cruise (not eligible as a constant level).</div>
 ${ofpHtml}</div>
 ${levelsCard}
 ${stepHtml}
+${hzHtml}
 ${cdHtml}
 <div class="card"><h2>Wind profile (cruise average)</h2>${profileSvg(cruise,lv,c.mine)}</div>`;
- STATE.last={c,bestF,pick:lv,S,P};}
+ STATE.last={c,bestF,pick:lv,S,P};
+ const ub=$("userec");if(ub)ub.onclick=()=>{$("recm").value=recM;saveInputs();rerender()};}
 
 function profileSvg(cruise,lv,mine){const fls=[];for(let f=200;f<=410;f+=10)fls.push(f);const wsum=cruise.reduce((a,s)=>a+s.seg,0)||1;
  const comp=src=>fls.map(fl=>{let t=0;for(const s of cruise)t+=along(interpProf(src(s),fl*100),s.trk)*s.seg;return t/wsum});
@@ -319,6 +338,43 @@ function profileSvg(cruise,lv,mine){const fls=[];for(let f=200;f<=410;f+=10)fls.
  g+=`<line x1="${x(0)}" x2="${x(0)}" y1="10" y2="${H-20}" stroke="#8b949e" stroke-dasharray="3 3"/><text x="${x(lo)}" y="${H-5}" fill="#8b949e" font-size="10">${Math.round(lo)} kt</text><text x="${x(hi)-30}" y="${H-5}" fill="#8b949e" font-size="10">+${Math.round(hi)} kt</text>`;
  return`<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:520px">${g}<path d="${path(real)}" fill="none" stroke="#3fb950" stroke-width="2.5"/><path d="${path(fms)}" fill="none" stroke="#39c5cf" stroke-width="1.5" stroke-dasharray="5 3"/>${mn?`<path d="${path(mn)}" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="2 3"/>`:""}</svg>
 <div class="note"><span style="color:#3fb950">━</span> forecast tail(+)/head(−) wind · <span style="color:#39c5cf">╌</span> what FMS sees with recommended levels${mn?` · <span style="color:#f85149">┈</span> with your levels`:""}</div>`}
+
+/* ============================== hazards along the profile ============================== */
+/* thresholds: FAA AC 00-30C (moderate CAT likely: vertical shear >= 5 kt/1000 ft, horizontal >= 40 kt/150 NM, jet core >= 110 kt);
+   WMO: vertical shear >= 9 kt/1000 ft moderate-to-severe; horizontal temperature gradient >= 5 C/100 NM */
+const MMO=0.82,RISK=["None","Light","Moderate","Mod–Sev"],RCOL=["#3fb950","#e3b341","#f0883e","#f85149"],RMARG=[1000,2000,3000,4000];
+function hazards(S,c,path,lo,hi,wts){const out=[];const wAt=x=>{let w=wts[0].w;for(const q of wts)if(q.cum<=x)w=q.w;return w};
+ for(let i=0;i<S.length;i++){const s=S[i];if(s.cum<lo||s.cum>hi)continue;const fl=path.at(s.cum),h=fl*100,p=s.prof;
+  const pv=S[Math.max(0,i-1)],nx=S[Math.min(S.length-1,i+1)],dd=Math.max(1,nx.cum-pv.cum);
+  const up=interpProf(p,h+2000),dn=interpProf(p,h-2000),W=interpProf(p,h),vws=Math.hypot(up.u-dn.u,up.v-dn.v)/4;
+  const a=interpProf(pv.prof,h),b=interpProf(nx.prof,h),hws=Math.hypot(b.u-a.u,b.v-a.v)/dd*150,dT=Math.abs(b.T-a.T)/dd*100;
+  const dWa=(along(b,nx.trk)-along(a,pv.trk))/dd*50;let jet=0;for(let f=25000;f<=45000;f+=1000){const q=interpProf(p,f);jet=Math.max(jet,Math.hypot(q.u,q.v))}
+  let lv=0;if(vws>=3||hws>=20||jet>=110)lv=1;if(vws>=5||hws>=40||dT>=5)lv=2;if(vws>=9)lv=3;
+  const snd=c.mach>0?38.967854*Math.sqrt(W.T+273.15):600,mmoKt=(MMO-c.mach)*snd,spd=Math.abs(dWa)>=15||(dWa<0&&-dWa>=0.5*mmoKt);
+  const why=[];if(vws>=3)why.push("vertical shear "+vws.toFixed(1)+" kt/1000 ft");if(hws>=20)why.push("horizontal shear "+Math.round(hws)+" kt/150 NM");if(dT>=5)why.push("temperature change "+dT.toFixed(1)+" °C/100 NM");if(jet>=110)why.push("jet "+Math.round(jet)+" kt");if(spd)why.push("wind change "+Math.round(Math.abs(dWa))+" kt/50 NM");
+  const room=(flAtWeight(c.recmax,wAt(s.cum),c)-fl)*100;
+  out.push({s,fl,W,vws,hws,dT,dWa,jet,lv,spd,mmoKt,why,room,marg:Math.min(4000,RMARG[lv]+(spd?1000:0))})}
+ return out}
+function pathFromPlan(sp,base){if(!sp)return constPath(base.fl);const ch=[];sp.pick.forEach((L,k)=>{if(k==0||L!=sp.pick[k-1])ch.push({at:sp.segs[k].a,fl:L})});
+ return{L0:ch[0].fl,at:x=>{let f=ch[0].fl;for(const q of ch)if(x>=q.at)f=q.fl;return f}}}
+function profileChart(S,c,rec,recPath,hz,ofpPath,ofpSim){const W=700,H=300,L=40,R=10,T=12,B=60,tot=c.total;
+ /* zoom on the cruise: from 40 below the lowest cruise level to just above the highest REC MAX */
+ const cr=S.filter(s=>s.cum>rec.lo&&s.cum<rec.hi),lvs=cr.map(s=>recPath.at(s.cum)).concat(ofpPath?cr.map(s=>ofpPath.at(s.cum)):[]),wl0=rec.wts.filter(q=>q.cum>=rec.lo&&q.cum<=rec.hi);
+ const fmin=Math.floor((Math.min(...lvs,...wl0.map(q=>flAtWeight(c.opt,q.w,c)))-40)/20)*20,fmax=Math.ceil((Math.max(...wl0.map(q=>flAtWeight(c.recmax,q.w,c)))+10)/20)*20;
+ const x=d=>L+d/tot*(W-L-R),y=f=>T+(1-(f-fmin)/(fmax-fmin))*(H-T-B);let g=`<defs><clipPath id="pc"><rect x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}"/></clipPath></defs>`;
+ for(let f=fmin;f<=fmax;f+=20)g+=`<line x1="${L}" x2="${W-R}" y1="${y(f)}" y2="${y(f)}" stroke="#30363d"/><text x="2" y="${y(f)+4}" fill="#8b949e" font-size="11">FL${f}</text>`;let gp="";
+ const prof=(sim,path,col,dash,wd)=>{const pts=[[0,15],[sim.lo,path.L0]];let prev=path.L0;
+   for(const s of S){if(s.cum<=sim.lo||s.cum>=sim.hi)continue;const f=path.at(s.cum);if(f!=prev){pts.push([s.cum,prev],[s.cum+8,f]);prev=f}}
+   pts.push([sim.hi,prev],[tot,15]);return`<path d="${pts.map((p,i)=>(i?"L":"M")+x(p[0]).toFixed(1)+","+y(p[1]).toFixed(1)).join("")}" fill="none" stroke="${col}" stroke-width="${wd}" ${dash?`stroke-dasharray="${dash}"`:""}/>`};
+ /* REC MAX, margin and OPT along the cruise, from the simulated weight */
+ const wl=rec.wts.filter(q=>q.cum>=rec.lo&&q.cum<=rec.hi);const line=(fn,col,dash)=>`<path d="${wl.map((q,i)=>(i?"L":"M")+x(q.cum).toFixed(1)+","+y(fn(q.w)).toFixed(1)).join("")}" fill="none" stroke="${col}" stroke-width="1.3" ${dash?`stroke-dasharray="${dash}"`:""}/>`;
+ gp+=line(w=>flAtWeight(c.recmax,w,c),"#f85149","")+line(w=>flAtWeight(c.recmax,w,c)-c.recm/100,"#f85149","4 3")+line(w=>flAtWeight(c.opt,w,c),"#d2a8ff","2 3");
+ if(ofpPath&&ofpSim&&!ofpSim.bad)gp+=prof(ofpSim,ofpPath,"#8b949e","6 4",1.5);
+ gp+=prof(rec,recPath,"#39c5cf","",3);
+ for(const h of hz)gp+=`<circle cx="${x(h.s.cum).toFixed(1)}" cy="${y(h.fl).toFixed(1)}" r="${h.lv?4.5:3}" fill="${RCOL[h.lv]}"/>`;g+=`<g clip-path="url(#pc)">${gp}</g>`;
+ S.filter(s=>s.user&&s.name).forEach((s,i)=>{g+=`<line x1="${x(s.cum)}" x2="${x(s.cum)}" y1="${H-B}" y2="${H-B+4}" stroke="#8b949e"/><text transform="translate(${x(s.cum)+3},${H-B+8}) rotate(60)" fill="#8b949e" font-size="9.5">${s.name}</text>`});
+ return`<svg viewBox="0 0 ${W} ${H}" width="100%">${g}</svg>
+<div class="note"><span style="color:#39c5cf">━</span> recommended profile${ofpPath?` · <span style="color:#8b949e">╌</span> OFP`:""} · <span style="color:#f85149">━</span> REC MAX · <span style="color:#f85149">╌</span> REC MAX − margin · <span style="color:#d2a8ff">┈</span> OPT (no wind) · dots: turbulence risk ${RISK.map((r,i)=>`<span style="color:${RCOL[i]}">●</span> ${r}`).join(" ")}</div>`}
 
 /* ============================== OFP import ============================== */
 async function importOFP(file){const m=$("ofpmsg");m.className="msg";m.textContent="Reading OFP…";
@@ -334,7 +390,7 @@ async function importOFP(file){const m=$("ofpmsg");m.className="msg";m.textConte
   if(o.ff)$("ff").value=o.ff;
   if(o.p2)$("p2").value=o.p2;if(o.p4)$("p4").value=o.p4;
   const lvTxt=ofpChanges(o.levels).map((q,i)=>"FL"+q.fl+(i&&q.fix?" ("+q.fix+")":"")).join(" → ");
-  store("optfl.ofp",{route:o.route,levels:o.levels,trip:o.trip,levelsTxt:lvTxt});saveInputs();
+  store("optfl.ofp",{route:o.route,levels:o.levels,trip:o.trip,levelsTxt:lvTxt,sr:o.sr||{}});saveInputs();
   m.className="msg ok";m.textContent=`OFP ${o.orig||""}→${o.dest||""}: ${o.waypoints.length} fixes, ETD ${o.etd?o.etd.toISOString().slice(11,16)+"Z":"?"}, ${(o.type||"").toUpperCase()}, TOW ${o.tow?(o.tow/1000).toFixed(1)+" t":"?"}, CI ${o.ci??"?"}, M${o.mach||"?"}, FF ${o.ff||"?"} kg/h, penalties ${o.p2||"?"}% / ${o.p4||"?"}%, trip ${o.trip?kg(o.trip)+" kg":"?"}.\nOFP levels: ${lvTxt}.\nStill needed: OPT and REC MAX at TOW from the FMS (no winds).`;
  }catch(e){m.className="msg err";m.textContent="Couldn't read the OFP: "+(e.message||e)+". You can still paste the route.";console.error(e)}}
 
@@ -371,7 +427,7 @@ document.querySelectorAll(".segb").forEach(b=>b.onclick=()=>setMode(b.dataset.m)
 (function init(){const o=load("optfl.in");if(o){IDS.forEach(i=>{if(o[i]!=null&&o[i]!=="")$(i).value=o[i]});$("autocal").checked=!!o.autocal}
  if(!$("dep").value){const d=new Date(Date.now()+3600e3);d.setUTCMinutes(0,0,0);$("dep").value=d.toISOString().slice(0,16)}})();
 $("actype").addEventListener("change",()=>{const A=AC[$("actype").value];$("ff").value=A.ff;$("tow").value=A.w;saveInputs();rerender()});
-["model","ci","autocal","stepc","minstep"].forEach(id=>$(id).addEventListener("change",()=>{saveInputs();rerender()}));
+["model","ci","autocal","stepc","minstep","recm"].forEach(id=>$(id).addEventListener("change",()=>{saveInputs();rerender()}));
 function rerender(){if(STATE&&STATE.json)try{render(STATE.P)}catch(e){console.error(e)}}
 $("ofpfile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importOFP(f);e.target.value=""});
 $("go").onclick=go;

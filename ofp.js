@@ -59,6 +59,8 @@ export function parseOFP(lines){
     if (!started){ if (o.orig && name !== o.orig) continue; started = true; }
     const fl = /^\d{2,3}$/.test(t[1]) && li > 1 ? +t[1] : null;
     if (!SKIP.has(name)) o.waypoints.push({name, lat:t[li], lon});
+    const wi = t.findIndex(x => /^\d{3}\/\d{3}$/.test(x));
+    if (wi > 0 && /^\d{2}$/.test(t[wi+1] || "")) (o.sr = o.sr || {})[name] = +t[wi+1];
     if (fl !== null) o.levels.push({name, fl});
     const t3 = (lines[i+2] || "").split(" ");
     for (let k = 0; k < t3.length - 1; k++) if (/^[+-]\d{2}$/.test(t3[k]) && /^\d{3}$/.test(t3[k+1]) && +t3[k+1] >= 600 && +t3[k+1] < 900) machs.push(+t3[k+1]);

@@ -59,6 +59,14 @@ export function parseOFP(lines){
     if (!started){ if (o.orig && name !== o.orig) continue; started = true; }
     const fl = /^\d{2,3}$/.test(t[1]) && li > 1 ? +t[1] : null;
     if (!SKIP.has(name)) o.waypoints.push({name, lat:t[li], lon});
+    /* planned remaining fuel (line 1, last number) and accumulated time hh.mm (line 2, after accumulated distance) */
+    if (!SKIP.has(name)){
+      const rem = +(t[t.length-1].match(/^\d{3,6}$/) || [NaN])[0];
+      const t2 = lines[i+1].split(" "); let at = null;
+      for (let k = 0; k < t2.length - 1; k++) if (/^\d{4}$/.test(t2[k]) && /^\d{2}\.\d{2}$/.test(t2[k+1])){ const [h,mm] = t2[k+1].split("."); at = +h + +mm/60; break; }
+      if (name === o.orig && at === null) at = 0;
+      (o.fix = o.fix || []).push({name, rem: isFinite(rem) ? rem : null, at});
+    }
     const wi = t.findIndex(x => /^\d{3}\/\d{3}$/.test(x));
     if (wi > 0 && /^\d{2}$/.test(t[wi+1] || "")) (o.sr = o.sr || {})[name] = +t[wi+1];
     if (fl !== null) o.levels.push({name, fl});
@@ -69,6 +77,7 @@ export function parseOFP(lines){
   if (machs.length){ const c = {}; machs.forEach(v => c[v] = (c[v]||0) + 1); o.mach = +Object.entries(c).sort((a,b)=>b[1]-a[1])[0][0] / 1000; }
   if (o.trip && o.dn2) o.p2 = Math.round(1000 * o.dn2 / o.trip) / 10;
   if (o.trip && o.dn4) o.p4 = Math.round(1000 * o.dn4 / o.trip) / 10;
+  if (o.fix && o.fix.length && o.fix[0].rem) o.tof = o.fix[0].rem;
   o.route = o.waypoints.map(w => `${w.name}/${w.lat}${w.lon}`).join(" ");
   return o;
 }

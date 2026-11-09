@@ -1,4 +1,7 @@
 "use strict";
+const APPV="2.5";
+function showErr(m){try{const e=document.getElementById("m1");if(e){e.className="msg err";e.textContent="Error: "+m+" (v"+APPV+")"}}catch(x){}}
+window.addEventListener("error",e=>showErr(e.message||"unknown"));window.addEventListener("unhandledrejection",e=>showErr((e.reason&&e.reason.message)||String(e.reason)));
 /* ============================== constants ============================== */
 const APT={SCEL:[-33.393,-70.786],SCIE:[-36.7727,-73.0631],SCFA:[-23.4445,-70.4451],SCDA:[-20.5352,-70.1813],SCAR:[-18.3485,-70.3387],SCCF:[-22.4982,-68.9036],SCSE:[-29.9162,-71.1995],SCAT:[-27.2612,-70.7792],SCTE:[-41.4389,-73.094],SCCI:[-53.0026,-70.8546],SCQP:[-38.9259,-72.6515],SCVD:[-39.65,-73.0861],SCJO:[-40.6112,-73.061],SCBA:[-45.9161,-71.6895],SCNT:[-51.6715,-72.5284],SCIP:[-27.1648,-109.4219],SCCH:[-36.5825,-72.0314],SCPQ:[-42.3,-73.7158],
 SAEZ:[-34.8222,-58.5358],SABE:[-34.5592,-58.4156],SAME:[-32.8317,-68.7929],SACO:[-31.3236,-64.208],SAAR:[-32.9036,-60.785],SAZS:[-41.1512,-71.1575],SAWH:[-54.8433,-68.2958],SANT:[-26.8409,-65.1049],SASA:[-24.856,-65.4862],SAZN:[-38.949,-68.1557],
@@ -15,7 +18,7 @@ const AC={a320ceo:{cd:1,cf:1,dd:1,df:1,ff:2400,w:68},a320neo:{cd:1,cf:0.85,dd:1,
 const CLB=[[50,10,3,350],[100,18,5,500],[200,45,11,850],[250,65,14,1000],[290,85,17,1150],[330,110,21,1350],[350,125,23,1450],[370,145,26,1600],[390,175,31,1800],[410,210,37,2050]];
 const $=id=>document.getElementById(id);
 const D2R=Math.PI/180,R2D=180/Math.PI,REARTH=3440.065;
-$("aptlist").textContent=Object.keys(APT).join(" ");
+$("aptlist").textContent=Object.keys(APT).join(" ");try{document.getElementById("ver").textContent="v"+APPV}catch(e){}
 function store(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
 function load(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
 
@@ -104,9 +107,9 @@ function sim(S,c,path,opt={}){const src=opt.src||(s=>s.prof),pen=penaltyFn(c.p2,
  const L0=path.L0,cl=climbOf(L0,c),Lend=path.at(c.total-1),de=descOf(Lend,c);
  const wc=windBand(S,0,cl.d,3000,L0*100,src),wd=windBand(S,c.total-de.d,c.total,3000,Lend*100,src);
  const lo=cl.d+wc*cl.t,hi=c.total-(de.d+wd*de.t);if(hi-lo<15)return{fl:L0,bad:true,why:"short"};
- let w=c.tow*1000-cl.f*cal,time=0,fuel=0,dsum=0,tw=0,isa=0,tasS=0,prev=null,steps=0,over=false;const chk={},wts=[];
+ let w=c.tow*1000-cl.f*cal,time=0,fuel=0,dsum=0,tw=0,isa=0,tasS=0,prev=null,steps=0,over=false;const chk={},tchk={},wts=[];
  const wmid=c.tow*1000-0.5*c.ff*(c.total/450);
- for(const s of S){const d=Math.max(0,Math.min(s.a1,hi)-Math.max(s.a0,lo));
+ for(const s of S){const d=Math.max(0,Math.min(s.a1,hi)-Math.max(s.a0,lo)),f0=fuel,t0=time;
   if(d>0){const fl=path.at(s.cum);
    if(prev!==null&&fl!==prev){if(fl>prev){const sf=c.stepc*(fl-prev)/10*cal;fuel+=sf;w-=sf}steps++}prev=fl;
    if(fl>flAtWeight(c.recmax,w,c)-c.recm/100+0.5)over=true;
@@ -115,16 +118,13 @@ function sim(S,c,path,opt={}){const src=opt.src||(s=>s.prof),pen=penaltyFn(c.p2,
    const ff=c.ff*cal*(w/wmid),f=ff*(1+pen((fl-flAtWeight(c.opt,w,c))/10))*(tas/TASstd)*hrs;
    time+=hrs;fuel+=f;w-=f;dsum+=d;tw+=al*d;isa+=(W.T-isaT(fl*100))*d;tasS+=tas*d}
   wts.push({cum:s.cum,w});
-  if(s.user&&s.name)chk[s.name]=s.cum<lo?cl.f*cal*Math.sqrt(Math.max(0,s.cum)/lo):cl.f*cal+fuel+(s.cum>hi?de.f*cal*(s.cum-hi)/Math.max(1,c.total-hi):0)}
+  if(s.user&&s.name){if(s.cum<lo){const q=Math.max(0,s.cum)/lo;chk[s.name]=cl.f*cal*Math.sqrt(q);tchk[s.name]=cl.t*Math.pow(q,0.75)}
+   else if(s.cum<=hi){const fr=d>0?Math.min(1,Math.max(0,(Math.min(s.cum,hi)-Math.max(s.a0,lo))/d)):0;chk[s.name]=cl.f*cal+f0+(fuel-f0)*fr;tchk[s.name]=cl.t+t0+(time-t0)*fr}
+   else{const q=(s.cum-hi)/Math.max(1,c.total-hi);chk[s.name]=cl.f*cal+fuel+de.f*cal*q;tchk[s.name]=cl.t+time+de.t*q}}}
  if(!dsum)return{fl:L0,bad:true,why:"short"};
  const xf=(cl.f+de.f)*cal,xt=cl.t+de.t,T=time+xt,F=fuel+xf;
- return{fl:L0,fuel:F,time:T,cost:F+c.ci*T*60,cfuel:fuel,ctime:time,cgs:dsum/time,cdist:dsum,xf,tw:tw/dsum,isa:isa/dsum,tas:tasS/dsum,lo,hi,over,steps,chk,wts,wc,wd,cl,de}}
+ return{fl:L0,fuel:F,time:T,cost:F+c.ci*T*60,cfuel:fuel,ctime:time,cgs:dsum/time,cdist:dsum,xf,tw:tw/dsum,isa:isa/dsum,tas:tasS/dsum,lo,hi,over,steps,chk,tchk,wts,wc,wd,cl,de}}
 const constPath=L=>({L0:L,at:()=>L});
-/* path from "340 360/ASEPU" style text, using route waypoint distances */
-function pathFromSpec(spec,S){const toks=spec.toUpperCase().trim().split(/\s+/).filter(Boolean);if(!toks.length)return null;
- const L0=parseInt(toks[0].replace(/^FL/,""));if(!(L0>=100))return null;const ch=[];
- for(const t of toks.slice(1)){const[fl,fx]=t.replace(/^FL/,"").split("/");const s=S.find(q=>q.name==fx);if(!s||!(+fl>=100))return{err:t};ch.push({at:s.cum,fl:+fl})}
- ch.sort((a,b)=>a.at-b.at);return{L0,at:x=>{let f=L0;for(const q of ch)if(x>=q.at)f=q.fl;return f}}}
 /* OFP planned profile -> cruise level changes at fixes (T/C, steady levels, T/D) */
 function ofpChanges(levels){const out=[];let cur=null,lastFix=null;
  levels.forEach((it,i)=>{const pseudo=/^T_O_|^B_O_/.test(it.name);
@@ -192,13 +192,11 @@ function kg(x){return Math.round(x).toLocaleString("en-US")}
 function vecAvg(S,s0,s1,ft){let u=0,v=0,n=0;for(const s of S){if(s.cum<s0-1||s.cum>s1+1)continue;const w=interpProf(s.prof,ft);u+=w.u;v+=w.v;n++}return n?{u:u/n,v:v/n}:null}
 
 /* ============================== inputs ============================== */
-const IDS=["actype","mode","route","dep","tow","mach","ci","opt","recmax","recm","minfl","model","parity","ff","clf","magvar","p2","p4","stepc","minstep","mine","pf_tof","pf_ldf","pf_to","pf_ldg","pf_lv","pf_pts"];
-function saveInputs(){const o={};IDS.forEach(i=>o[i]=$(i).value);o.autocal=$("autocal").checked;store("optfl.in",o)}
-function calOf(ac){if(!$("autocal").checked)return 1;const h=(load("optfl.hist")||[]).filter(e=>e.ac==ac&&e.ratio>0.7&&e.ratio<1.3).slice(-10).map(e=>e.ratio).sort((a,b)=>a-b);
- if(!h.length)return 1;const m=h.length%2?h[(h.length-1)/2]:(h[h.length/2-1]+h[h.length/2])/2;return Math.min(1.15,Math.max(0.85,m))}
+const IDS=["actype","mode","route","dep","tow","mach","ci","opt","recmax","recm","minfl","model","parity","ff","clf","magvar","p2","p4","stepc","minstep","mine"];
+function saveInputs(){const o={};IDS.forEach(i=>o[i]=$(i).value);store("optfl.in",o)}
 function cfg(){const g=id=>parseFloat($(id).value);const ac=$("actype").value;
  return{ac,mach:g("mach")||0.78,ci:g("ci")||0,tow:g("tow")||AC[ac].w,opt:g("opt"),recmax:g("recmax"),minfl:g("minfl"),ff:g("ff"),clf:g("clf")||100,p2:g("p2"),p4:g("p4"),
-  recm:isFinite(g("recm"))?Math.max(0,g("recm")):2000,stepc:isFinite(g("stepc"))?g("stepc"):25,minstep:isFinite(g("minstep"))?g("minstep"):40,parity:$("parity").value,mode:$("mode").value,magvar:g("magvar")||0,model:$("model").value,cal:calOf(ac),
+  recm:isFinite(g("recm"))?Math.max(0,g("recm")):2000,stepc:isFinite(g("stepc"))?g("stepc"):25,minstep:isFinite(g("minstep"))?g("minstep"):40,parity:$("parity").value,mode:$("mode").value,magvar:g("magvar")||0,model:$("model").value,cal:1,
   mine:$("mine").value.split(/[\s,]+/).map(Number).filter(x=>x>=100&&x<=450).slice(0,4)}}
 function depDate(){const v=$("dep").value;return v?new Date(v+":00Z"):new Date()}
 
@@ -261,16 +259,17 @@ ${changes.map((q,i)=>{const nx=changes[i+1];return`<tr class="${i>0?"best":""}">
 <p style="font-size:13px">Saves ≈<b>${kg(sp.saving)} kg</b>${c.ci?" (cost units)":""} against FL${bestF.fl} all the way, after ${c.stepc} kg per 1000 ft of step climb.</p>`
   :`<p style="font-size:13px">No step worth requesting: <b>FL${bestF.fl}</b> all the way${changes.length>1&&sp.saving!=null&&sp.saving>0?` (best step plan saves only ${kg(sp.saving)} kg)`:""}.</p>`}
 <p class="note">Steps can only happen at route fixes. OPT and REC MAX rise as fuel burns (constant weight/pressure ratio). The minimum saving is in More settings.</p></div>`}
- /* recommended profile, hazards, chart */
+ /* recommended profile, hazards, chart (isolated so a problem here never hides the rest) */
  const showPlan=sp&&bestF.cdist>=250&&sp.saving!=null&&sp.saving>=c.minstep&&sp.pick.some((L,k)=>k&&L!=sp.pick[k-1]);
  const recPath=showPlan?pathFromPlan(sp,bestF):constPath(bestF.fl),recSim=showPlan?sim(S,c,recPath):bestF;
- const HZ=recSim.bad?[]:hazards(S,c,recPath,recSim.lo,recSim.hi,recSim.wts),OFd=load("optfl.ofp"),sr=OFd&&OFd.route==P.route?OFd.sr||{}:{};
+ const OFd=load("optfl.ofp"),ofpOK=!!(OFd&&OFd.route==P.route),ofpP=ofpOK?pathFromOFP(OFd.levels,S):null,ofpS=ofpP?sim(S,c,ofpP):null;
+ let hzHtml="",recM=null;try{
+ const HZ=recSim.bad?[]:hazards(S,c,recPath,recSim.lo,recSim.hi,recSim.wts),sr=ofpOK?OFd.sr||{}:{};
  /* the margin only matters where the profile is close to REC MAX */
- const near=HZ.filter(h=>h.room<4500),recM=near.length?Math.max(...near.map(h=>h.marg)):1000,worst=HZ.length?HZ.reduce((a,b)=>b.lv>a.lv||(b.lv==a.lv&&b.vws>a.vws)?b:a):null,
+ const near=HZ.filter(h=>h.room<4500);recM=near.length?Math.max(...near.map(h=>h.marg)):1000;const worst=HZ.length?HZ.reduce((a,b)=>b.lv>a.lv||(b.lv==a.lv&&b.vws>a.vws)?b:a):null,
   worstNear=near.length?near.reduce((a,b)=>b.marg>a.marg?b:a):null;
- const ofpP=OFd&&OFd.route==P.route?pathFromOFP(OFd.levels,S):null,ofpS=ofpP?sim(S,c,ofpP):null;
  const hzRows=HZ.filter(h=>h.s.user&&h.s.name).map(h=>`<tr><td>${h.s.name}</td><td>FL${h.fl}</td><td>${windStr(h.W)}</td><td style="color:${h.vws>=5?RCOL[2]:h.vws>=3?RCOL[1]:"inherit"}">${h.vws.toFixed(1)}</td>${Object.keys(sr).length?`<td>${sr[h.s.name]??"—"}</td>`:""}<td>${Math.round(h.hws)}</td><td>${h.dT.toFixed(1)}</td><td style="color:${h.spd?RCOL[2]:"inherit"}">${Math.abs(h.dWa)<1?"0":(h.dWa>0?"↓":"↑")+Math.round(Math.abs(h.dWa))}</td><td style="color:${RCOL[h.lv]}">${RISK[h.lv]}</td><td style="color:${h.room<h.marg?"var(--rd)":"inherit"}">${Math.round(h.room/100)*100}</td><td>${h.marg}</td></tr>`).join("");
- const hzHtml=`<div class="card"><h2>Vertical profile</h2>${recSim.bad?"":profileChart(S,c,recSim,recPath,HZ,ofpP,ofpS)}</div>
+ hzHtml=`<div class="card"><h2>Vertical profile</h2>${recSim.bad?"":profileChart(S,c,recSim,recPath,HZ,ofpP,ofpS)}</div>
 <div class="card"><h2>Route hazards &amp; REC MAX margin</h2>
 <div class="row" style="justify-content:space-between"><div><div class="note">Recommended margin</div><div class="big" style="color:${RCOL[RMARG.indexOf(Math.min(recM,4000))]||"var(--acc)"}">${recM} ft</div></div>
 <div><div class="note">Your margin</div><div class="big" style="color:var(--cy)">${c.recm} ft</div></div>${recM!=c.recm?`<button class="sec" id="userec">Use ${recM} ft</button>`:""}</div>
@@ -278,10 +277,20 @@ ${changes.map((q,i)=>{const nx=changes[i+1];return`<tr class="${i>0?"best":""}">
 ${worst&&worst.lv&&worst!==worstNear?` Highest risk on the route: <b>${worst.s.name||Math.round(worst.s.cum)+" NM"}</b>, ${RISK[worst.lv].toLowerCase()} (${worst.why.join(", ")}), where you're ${Math.round(worst.room)} ft below REC MAX.`:""}</p>
 <div class="scroll"><table><tr><th>WPT</th><th>FL</th><th>WIND</th><th>VWS</th>${Object.keys(sr).length?"<th>OFP SR</th>":""}<th>HWS</th><th>ΔT</th><th>SPD</th><th>RISK</th><th>ROOM</th><th>MARG</th></tr>${hzRows||`<tr><td colspan="9">No fixes in the cruise portion.</td></tr>`}</table></div>
 <p class="note">At the recommended level. VWS = vertical wind shear, kt per 1000 ft (±2000 ft). HWS = horizontal shear along the route, kt per 150 NM. ΔT = temperature change, °C per 100 NM. SPD = along-track wind change per 50 NM: ↓ means tailwind increasing / headwind dropping, so speed decays; ↑ means headwind increasing, so speed rises towards MMO (margin ≈${HZ.length?Math.round(HZ[0].mmoKt):"?"} kt at M${c.mach}). Risk thresholds: FAA AC 00-30C (moderate CAT likely with VWS ≥ 5 kt/1000 ft, HWS ≥ 40 kt/150 NM, jet ≥ 110 kt) and WMO (VWS ≥ 9 kt/1000 ft moderate-to-severe; ΔT ≥ 5 °C/100 NM). ROOM = ft below REC MAX for the weight there (red if less than the suggested margin). The recommended margin only counts points within 4500 ft of REC MAX, where it can bind. Margin: 1000 ft with no signal, 2000 light, 3000 moderate, 4000 moderate-to-severe, +1000 ft for large speed changes. This is a rule of thumb from model data with levels 3000–5000 ft apart. It doesn't see mountain waves or convection: use it alongside SIGWX charts, PIREPs and company policy.</p></div>`;
- /* OFP comparison */
- let ofpHtml="";const OF=load("optfl.ofp");
- if(OF&&OF.route==P.route&&OF.levels){const op=pathFromOFP(OF.levels,S);if(op){const r=sim(S,c,op);if(!r.bad){const d=r.fuel-bestF.fuel;
-  ofpHtml=`<p style="font-size:13px">OFP profile (${OF.levelsTxt||""}) with these winds: ${kg(r.fuel)} kg, ${hm(r.time)} · ${d>=0?"+":"−"}${kg(Math.abs(d))} kg vs FL${bestF.fl}${OF.trip?` · OFP trip ${kg(OF.trip)} kg`:""}.</p>`}}}
+ }catch(e){console.error(e);hzHtml=`<div class="card err">Profile/hazards could not be drawn: ${e.message}</div>`}
+ /* OFP vs optimizer */
+ let cmpHtml="";
+ if(ofpS&&!ofpS.bad&&!recSim.bad){const dF=ofpS.fuel-recSim.fuel,dT=(ofpS.time-recSim.time)*60,dC=ofpS.cost-recSim.cost;
+  const tt=OFd.tripTime?(+OFd.tripTime.slice(0,2)+ +OFd.tripTime.slice(2)/60):null,bias=OFd.trip?ofpS.fuel/OFd.trip-1:null;
+  const row=(n,lv,r)=>`<tr><td>${n}</td><td style="text-align:left;white-space:normal">${lv}</td><td>${kg(r.fuel)}</td><td>${hm(r.time)}</td>${c.ci?`<td>${kg(r.cost)}</td>`:""}</tr>`;
+  cmpHtml=`<div class="card"><h2>OFP vs optimizer</h2>
+<div class="row" style="justify-content:space-between"><div><div class="note">Fuel</div><div class="big" style="color:${dF>=0?"var(--acc)":"var(--rd)"}">${dF>=0?"−":"+"}${kg(Math.abs(dF))} kg</div></div>
+<div><div class="note">Time</div><div class="big" style="color:${dT>=0?"var(--acc)":"var(--rd)"}">${Math.abs(dT)<0.5?"same":(dT>0?"−":"+")+Math.round(Math.abs(dT))+" min"}</div></div>
+${c.ci?`<div><div class="note">Cost (CI ${c.ci})</div><div class="big" style="color:${dC>=0?"var(--acc)":"var(--rd)"}">${dC>=0?"−":"+"}${kg(Math.abs(dC))}</div></div>`:""}</div>
+<p style="font-size:13px">${Math.abs(dF)<30&&Math.abs(dT)<1?"The optimizer profile is practically the same as the OFP.":dF>=0?`Flying the optimizer profile instead of the OFP saves ≈<b>${kg(dF)} kg</b>${dT>=0.5?` and ${Math.round(dT)} min`:dT<=-0.5?` but takes ${Math.round(-dT)} min longer`:""}.`:`The OFP profile is ≈<b>${kg(-dF)} kg</b> better than the optimizer with these winds${c.ci&&dC<0?" (the optimizer wins on time cost)":""}.`}</p>
+<div class="scroll"><table><tr><th>PROFILE</th><th style="text-align:left">LEVELS</th><th>TRIP kg</th><th>TIME</th>${c.ci?"<th>COST</th>":""}</tr>
+${row("OFP",OFd.levelsTxt||"",ofpS)}${row("Optimizer",profTxt(recPath,recSim,S),recSim)}</table></div>
+<p class="note">Both profiles are flown through the same model and the same forecast winds, so the difference is like for like.${OFd.trip?` For reference, the OFP's own figures are ${kg(OFd.trip)} kg${tt?" and "+hm(tt):""}; the tool estimates the OFP profile at ${kg(ofpS.fuel)} kg (${sgn(bias*100,1)}%), so read absolute kg with that offset.`:""}</p></div>`}
  /* climb & descent winds */
  const clL=[50,100,180,250],cw=bestF.cl.d+bestF.wc*bestF.cl.t,dw=c.total-(bestF.de.d+bestF.wd*bestF.de.t);
  const cdRows=(s0,s1)=>clL.concat([bestF.fl]).map(f=>{const w=vecAvg(S,s0,s1,f*100);return w?`<td>${windStr(w)}</td>`:"<td>—</td>"}).join("");
@@ -320,14 +329,16 @@ ${res.slice().reverse().map(r=>{const d=key(r)-key(bestF),isRef=r===ref,have=r.t
 ${c.ci?"":`<td>${sgn(r.isa)}</td>`}<td>${Math.round(r.cgs)}</td><td>${hm(r.time)}</td><td>${kg(r.fuel)}</td>${c.ci?`<td>${kg(r.cost)}</td>`:""}<td>${r===bestF?"best":d<0?"−"+kg(-d):"+"+kg(d)}</td></tr>`}).join("")}
 </table></div>
 <div class="note">WIND = average tail(+)/head(−) over the cruise. HAVE = wind gain vs your OPT; NEED = gain required to pay for leaving OPT (green when HAVE ≥ NEED). TRIP = climb + cruise + descent, with weight-based OPT.${c.ci?" COST = fuel + CI × minutes (kg).":""} * = inside the ${kg(c.recm)} ft REC MAX margin somewhere in the cruise (not eligible as a constant level).</div>
-${ofpHtml}</div>
+</div>
+${cmpHtml}
 ${levelsCard}
 ${stepHtml}
+<div id="logcard"></div>
 ${hzHtml}
 ${cdHtml}
 <div class="card"><h2>Wind profile (cruise average)</h2>${profileSvg(cruise,lv,c.mine)}</div>`;
- STATE.last={c,bestF,pick:lv,S,P};
- const ub=$("userec");if(ub)ub.onclick=()=>{$("recm").value=recM;saveInputs();rerender()};}
+ STATE.last={c,bestF,pick:lv,S,P,recPath,ofpP,ofd:ofpOK?OFd:null};renderLog();
+ const ub=$("userec");if(ub&&recM)ub.onclick=()=>{$("recm").value=recM;saveInputs();rerender()};}
 
 function profileSvg(cruise,lv,mine){const fls=[];for(let f=200;f<=410;f+=10)fls.push(f);const wsum=cruise.reduce((a,s)=>a+s.seg,0)||1;
  const comp=src=>fls.map(fl=>{let t=0;for(const s of cruise)t+=along(interpProf(src(s),fl*100),s.trk)*s.seg;return t/wsum});
@@ -355,6 +366,7 @@ function hazards(S,c,path,lo,hi,wts){const out=[];const wAt=x=>{let w=wts[0].w;f
   const room=(flAtWeight(c.recmax,wAt(s.cum),c)-fl)*100;
   out.push({s,fl,W,vws,hws,dT,dWa,jet,lv,spd,mmoKt,why,room,marg:Math.min(4000,RMARG[lv]+(spd?1000:0))})}
  return out}
+function profTxt(path,r,S){const out=[];let prev=null;for(const s of S){if(s.cum<r.lo||s.cum>r.hi)continue;const f=path.at(s.cum);if(f!==prev){out.push("FL"+f+(prev!==null&&s.name?" ("+s.name+")":""));prev=f}}return out.join(" → ")}
 function pathFromPlan(sp,base){if(!sp)return constPath(base.fl);const ch=[];sp.pick.forEach((L,k)=>{if(k==0||L!=sp.pick[k-1])ch.push({at:sp.segs[k].a,fl:L})});
  return{L0:ch[0].fl,at:x=>{let f=ch[0].fl;for(const q of ch)if(x>=q.at)f=q.fl;return f}}}
 function profileChart(S,c,rec,recPath,hz,ofpPath,ofpSim){const W=700,H=300,L=40,R=10,T=12,B=60,tot=c.total;
@@ -378,7 +390,7 @@ function profileChart(S,c,rec,recPath,hz,ofpPath,ofpSim){const W=700,H=300,L=40,
 
 /* ============================== OFP import ============================== */
 async function importOFP(file){const m=$("ofpmsg");m.className="msg";m.textContent="Reading OFP…";
- try{const [pdfjs,mod]=await Promise.all([import("./pdf.min.mjs"),import("./ofp.js")]);pdfjs.GlobalWorkerOptions.workerSrc=new URL("./pdf.worker.min.mjs",location.href).href;
+ try{const [pdfjs,mod]=await Promise.all([import("./pdf.min.mjs"),import("./ofp.js?v="+APPV)]);pdfjs.GlobalWorkerOptions.workerSrc=new URL("./pdf.worker.min.mjs",location.href).href;
   const lines=await mod.pdfLines(pdfjs,new Uint8Array(await file.arrayBuffer()));const o=mod.parseOFP(lines);
   if(o.waypoints.length<2)throw new Error("No navigation log found in this PDF.");
   $("route").value=o.route;
@@ -390,44 +402,63 @@ async function importOFP(file){const m=$("ofpmsg");m.className="msg";m.textConte
   if(o.ff)$("ff").value=o.ff;
   if(o.p2)$("p2").value=o.p2;if(o.p4)$("p4").value=o.p4;
   const lvTxt=ofpChanges(o.levels).map((q,i)=>"FL"+q.fl+(i&&q.fix?" ("+q.fix+")":"")).join(" → ");
-  store("optfl.ofp",{route:o.route,levels:o.levels,trip:o.trip,levelsTxt:lvTxt,sr:o.sr||{}});saveInputs();
+  store("optfl.ofp",{route:o.route,levels:o.levels,trip:o.trip,tripTime:o.tripTime,tof:o.tof,fix:o.fix||[],levelsTxt:lvTxt,sr:o.sr||{}});saveInputs();
   m.className="msg ok";m.textContent=`OFP ${o.orig||""}→${o.dest||""}: ${o.waypoints.length} fixes, ETD ${o.etd?o.etd.toISOString().slice(11,16)+"Z":"?"}, ${(o.type||"").toUpperCase()}, TOW ${o.tow?(o.tow/1000).toFixed(1)+" t":"?"}, CI ${o.ci??"?"}, M${o.mach||"?"}, FF ${o.ff||"?"} kg/h, penalties ${o.p2||"?"}% / ${o.p4||"?"}%, trip ${o.trip?kg(o.trip)+" kg":"?"}.\nOFP levels: ${lvTxt}.\nStill needed: OPT and REC MAX at TOW from the FMS (no winds).`;
  }catch(e){m.className="msg err";m.textContent="Couldn't read the OFP: "+(e.message||e)+". You can still paste the route.";console.error(e)}}
 
-/* ============================== post-flight & history ============================== */
-function tParse(s){const m=(s||"").match(/(\d{1,2})[:.]?(\d{2})/);return m?+m[1]+ +m[2]/60:null}
-function fuelKg(v){const x=parseFloat(v);return!isFinite(x)?null:x<200?x*1000:x}
-function postflight(){const o=$("pfout");if(!STATE||!STATE.last){o.className="msg warn";o.textContent="Run a calculation for this flight first.";return null}
- const{S,P}=STATE.last,c=cfg();c.total=P.total;useModel(S,c.model);
- const p=pathFromSpec($("pf_lv").value,S);if(!p||p.err){o.className="msg err";o.textContent=p&&p.err?"Fix not on the route: "+p.err:"Enter the levels flown, e.g. 340 360/ASEPU";return null}
- const r=sim(S,c,p,{cal:1});if(r.bad){o.className="msg err";o.textContent="Route too short for that level.";return null}
- const tof=fuelKg($("pf_tof").value),ldf=fuelKg($("pf_ldf").value),t1=tParse($("pf_to").value),t2=tParse($("pf_ldg").value);
- if(tof==null||ldf==null){o.className="msg warn";o.textContent=`Model with cal 1.000: trip ${kg(r.fuel)} kg, ${hm(r.time)}. Add takeoff and landing fuel to compare.`;return null}
- const act=tof-ldf,tAct=t1!=null&&t2!=null?((t2-t1+24)%24):null,ratio=act/r.fuel;
- let rows="";(($("pf_pts").value||"").toUpperCase().split(/\n+/)).forEach(l=>{const m=l.trim().match(/^([A-Z0-9]+)\s+([\d.]+)/);if(!m)return;const pr=r.chk[m[1]];const a=tof-fuelKg(m[2]);
-  if(pr!=null)rows+=`<tr><td>${m[1]}</td><td>${kg(pr)}</td><td>${kg(a)}</td><td>${sgn(a-pr)}</td></tr>`});
- o.className="msg";o.innerHTML=`<div class="scroll"><table><tr><th></th><th>MODEL</th><th>ACTUAL</th><th>Δ</th></tr>
-<tr><td>Trip fuel</td><td>${kg(r.fuel)}</td><td>${kg(act)}</td><td>${sgn((ratio-1)*100,1)}%</td></tr>
-${tAct!=null?`<tr><td>Flight time</td><td>${hm(r.time)}</td><td>${hm(tAct)}</td><td>${sgn((tAct-r.time)*60)} min</td></tr>`:""}</table></div>
-${rows?`<label>Fuel burnt since takeoff (kg)</label><div class="scroll"><table><tr><th>FIX</th><th>MODEL</th><th>ACTUAL</th><th>Δ</th></tr>${rows}</table></div>`:""}
-<p class="note">Fuel ratio ${ratio.toFixed(3)} (actual ÷ model, uncalibrated). Save it to build the calibration.</p>`;
- return{date:P.dep.toISOString().slice(0,10),route:P.pts[0].name+"-"+P.pts[P.pts.length-1].name,ac:c.ac,tow:c.tow,rec:STATE.last.bestF.fl,uplink:STATE.last.pick.join("/"),flown:$("pf_lv").value.toUpperCase(),model:Math.round(r.fuel),actual:Math.round(act),ratio:+ratio.toFixed(4),tModel:+r.time.toFixed(3),tAct}}
-function renderHist(){const h=load("optfl.hist")||[],o=$("hout");if(!h.length){o.innerHTML='<span class="note">No flights saved yet.</span>';return}
- const by={};h.forEach(e=>{(by[e.ac]=by[e.ac]||[]).push(e.ratio)});
- o.innerHTML=`<div class="scroll"><table><tr><th>DATE</th><th>ROUTE</th><th>TYPE</th><th>REC</th><th>FLOWN</th><th>MODEL</th><th>ACT</th><th>Δ%</th></tr>
-${h.slice().reverse().map(e=>`<tr><td>${e.date}</td><td>${e.route}</td><td>${e.ac.toUpperCase()}</td><td>FL${e.rec}</td><td>${e.flown}</td><td>${kg(e.model)}</td><td>${kg(e.actual)}</td><td>${sgn((e.ratio-1)*100,1)}</td></tr>`).join("")}</table></div>
-<p class="note">${Object.entries(by).map(([k,v])=>`${k.toUpperCase()}: ${v.length} flight${v.length>1?"s":""}, calibration ×${calOfList(v).toFixed(3)}`).join(" · ")}. Turn on auto-calibrate in More settings to apply it.</p>`}
-function calOfList(v){const s=v.filter(x=>x>0.7&&x<1.3).slice(-10).sort((a,b)=>a-b);if(!s.length)return 1;const m=s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;return Math.min(1.15,Math.max(0.85,m))}
+/* ============================== flight log: prediction vs OFP vs actual ============================== */
+function tParse(v){const m=String(v||"").trim().match(/^(\d{1,2})[:.]?(\d{2})$/);return m&&+m[1]<24&&+m[2]<60?+m[1]+ +m[2]/60:null}
+function fuelKg(v){const x=parseFloat(String(v||"").replace(",","."));return!isFinite(x)?null:x<200?x*1000:x}
+function hhmm(h){h=((h%24)+24)%24;const m=Math.round(h*60)%1440;return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0")}
+function tdiff(a,b){let d=(a-b)*60;while(d>720)d-=1440;while(d<-720)d+=1440;return d}
+function logState(route){const L=load("optfl.log");return L&&L.route==route?L:{route,prof:"opt",fl:"",tot:"",tof:"",act:{}}}
+function renderLog(){const box=$("logcard");if(!box||!STATE||!STATE.last)return;const{c,S,P,recPath,ofpP,ofd,bestF}=STATE.last;const LG=logState(P.route);
+ if(LG.prof=="ofp"&&!ofpP)LG.prof="opt";
+ const fixFL=parseInt(LG.fl)||bestF.fl,path=LG.prof=="ofp"?ofpP:LG.prof=="fl"?constPath(fixFL):recPath,r=sim(S,c,path);
+ const depH=P.dep.getUTCHours()+P.dep.getUTCMinutes()/60,tot=tParse(LG.tot)??depH+0.25,tof=fuelKg(LG.tof)??(ofd&&ofd.tof?ofd.tof:null);
+ const ofix={};if(ofd&&ofd.fix)for(const f of ofd.fix)ofix[f.name]=f;
+ const pts=S.filter(s=>s.user&&s.name);
+ const fob=b=>tof!=null?(tof-b)/1000:null,ft=x=>x==null?"—":x.toFixed(1);
+ const rows=r.bad?`<tr><td colspan="9">This profile doesn't fit the route.</td></tr>`:pts.map(s=>{const n=s.name,o=ofix[n],ta=tot+(r.tchk[n]??0),fa=fob(r.chk[n]??0),
+   ot=o&&o.at!=null?tot+o.at:null,of=o&&o.rem!=null&&ofd.tof&&tof!=null?(tof-(ofd.tof-o.rem))/1000:null,A=LG.act[n]||{},
+   lv=s.cum<r.lo?"CLB":s.cum>r.hi?"DES":"FL"+path.at(s.cum);
+   return`<tr data-n="${n}"><td>${n}<div class="note" style="font-size:10px">${Math.round(s.cum)} NM · ${lv}</div></td><td>${hhmm(ta)}</td><td class="mut">${ot!=null?hhmm(ot):"—"}</td>
+<td><input class="li" data-k="ata" value="${A.ata||""}" placeholder="hh:mm" inputmode="numeric"></td><td>${ft(fa)}</td><td class="mut">${ft(of)}</td>
+<td><input class="li" data-k="fob" value="${A.fob||""}" placeholder="t" inputmode="decimal"></td><td class="dl" data-ta="${ta}" data-fa="${fa??""}" data-ot="${ot??""}" data-of="${of??""}"></td></tr>`}).join("");
+ const last=pts[pts.length-1],land=r.bad?null:{t:tot+r.time,f:fob(r.fuel)};
+ box.innerHTML=`<div class="card"><h2>Flight log</h2>
+<div class="grid">
+<div><label>Profile</label><select id="lg_prof"><option value="opt">Optimizer</option>${ofpP?'<option value="ofp">OFP</option>':""}<option value="fl">Fixed FL</option></select></div>
+<div id="lg_flw" style="${LG.prof=="fl"?"":"display:none"}"><label>Fixed FL</label><input id="lg_fl" type="number" step="10" value="${fixFL}"></div>
+<div><label>Takeoff time (UTC)</label><input id="lg_tot" value="${LG.tot}" placeholder="${hhmm(depH+0.25)}"></div>
+<div><label>Takeoff fuel (t or kg)</label><input id="lg_tof" value="${LG.tof}" placeholder="${ofd&&ofd.tof?(ofd.tof/1000).toFixed(1):"e.g. 15.9"}"></div></div>
+${land?`<p style="font-size:13px">Landing ${last?last.name:""}: <b>${hhmm(land.t)}</b>${land.f!=null?`, <b>${land.f.toFixed(1)} t</b> on board`:""} · trip ${kg(r.fuel)} kg, ${hm(r.time)} (${LG.prof=="ofp"?"OFP profile":LG.prof=="fl"?"FL"+fixFL+" constant":profTxt(path,r,S)}).</p>`:""}
+<div class="scroll"><table class="log"><tr><th>WPT</th><th>ETO</th><th class="mut">OFP</th><th>ATA</th><th>FOB</th><th class="mut">OFP</th><th>AFOB</th><th>Δ</th></tr>${rows}</table></div>
+<p class="note">ETO and FOB = tool prediction from your takeoff time and fuel. OFP = the plan's own time and fuel at each fix, shifted to your takeoff time and fuel. Type the actual time (ATA) and fuel (AFOB, in t or kg) as you pass each fix. Δ = actual minus prediction (minutes / kg), with the difference against the OFP below it. Your entries are kept on this device for this route.</p>
+<button class="sec" id="lg_clear">Clear actual values</button></div>`;
+ const save=()=>store("optfl.log",LG),upd=tr=>{const n=tr.dataset.n,A=LG.act[n]||{},cell=tr.querySelector(".dl"),d=cell.dataset;
+   const at=tParse(A.ata),af=fuelKg(A.fob),pt=[],po=[];
+   if(at!=null){pt.push(sgn(tdiff(at,+d.ta))+"′");if(d.ot)po.push(sgn(tdiff(at,+d.ot))+"′")}
+   if(af!=null){if(d.fa)pt.push(sgn(af-1000*+d.fa));if(d.of)po.push(sgn(af-1000*+d.of))}
+   const bad=(at!=null&&Math.abs(tdiff(at,+d.ta))>=5)||(af!=null&&d.fa&&Math.abs(af-1000*+d.fa)>=300);
+   cell.innerHTML=pt.length?`<span style="color:${bad?"var(--rd)":"var(--acc)"}">${pt.join(" / ")}</span>${po.length?`<div class="note" style="font-size:10px">OFP ${po.join(" / ")}</div>`:""}`:""};
+ box.querySelectorAll("tr[data-n]").forEach(tr=>{upd(tr);tr.querySelectorAll("input.li").forEach(inp=>inp.addEventListener("input",()=>{const n=tr.dataset.n;(LG.act[n]=LG.act[n]||{})[inp.dataset.k]=inp.value.trim();save();upd(tr)}))});
+ $("lg_prof").value=LG.prof;
+ $("lg_prof").onchange=e=>{LG.prof=e.target.value;save();setTimeout(renderLog,0)};
+ $("lg_fl").onchange=e=>{LG.fl=e.target.value;save();setTimeout(renderLog,0)};
+ $("lg_tot").onchange=e=>{LG.tot=e.target.value.trim();save();setTimeout(renderLog,0)};
+ $("lg_tof").onchange=e=>{LG.tof=e.target.value.trim();save();setTimeout(renderLog,0)};
+ let clr=0;$("lg_clear").onclick=()=>{if(!clr){clr=1;$("lg_clear").textContent="Tap again to clear";setTimeout(()=>{clr=0;const b=$("lg_clear");if(b)b.textContent="Clear actual values"},3000);return}LG.act={};save();renderLog()}}
 
 /* ============================== wiring ============================== */
 function setMode(m){$("mode").value=m;document.querySelectorAll(".segb").forEach(b=>b.classList.toggle("on",b.dataset.m==m));
  $("mineLbl").textContent=m=="datalink"?"Levels you usually request in the uplink (to compare)":"Levels you normally enter (to compare)";
  if(STATE&&STATE.json)try{render(STATE.P)}catch(e){console.error(e)}saveInputs()}
 document.querySelectorAll(".segb").forEach(b=>b.onclick=()=>setMode(b.dataset.m));
-(function init(){const o=load("optfl.in");if(o){IDS.forEach(i=>{if(o[i]!=null&&o[i]!=="")$(i).value=o[i]});$("autocal").checked=!!o.autocal}
+(function init(){const o=load("optfl.in");if(o){IDS.forEach(i=>{if(o[i]!=null&&o[i]!=="")$(i).value=o[i]})}
  if(!$("dep").value){const d=new Date(Date.now()+3600e3);d.setUTCMinutes(0,0,0);$("dep").value=d.toISOString().slice(0,16)}})();
 $("actype").addEventListener("change",()=>{const A=AC[$("actype").value];$("ff").value=A.ff;$("tow").value=A.w;saveInputs();rerender()});
-["model","ci","autocal","stepc","minstep","recm"].forEach(id=>$(id).addEventListener("change",()=>{saveInputs();rerender()}));
+["model","ci","stepc","minstep","recm"].forEach(id=>$(id).addEventListener("change",()=>{saveInputs();rerender()}));
 function rerender(){if(STATE&&STATE.json)try{render(STATE.P)}catch(e){console.error(e)}}
 $("ofpfile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importOFP(f);e.target.value=""});
 $("go").onclick=go;
@@ -436,11 +467,6 @@ $("usepaste").onclick=()=>{if(!STATE)return;let j;try{j=JSON.parse($("pj").value
 $("reuse").onclick=()=>{saveInputs();let P;try{P=prepare()}catch(e){setMsg(e.message,"err");return}
  const s=load("optfl.data");const json=STATE&&STATE.json&&STATE.P.route==P.route?STATE.json:(s&&s.route==P.route?s.json:null);
  if(!json){setMsg("No wind data for this route yet. Tap Get winds.","warn");return}finish(P,json,(STATE&&STATE.meta)||(s&&s.meta)||{})};
-$("pfrun").onclick=()=>{saveInputs();postflight()};
-$("pfsave").onclick=()=>{saveInputs();const e=postflight();if(!e)return;const h=load("optfl.hist")||[];h.push(e);store("optfl.hist",h);renderHist();$("hcard").open=true};
-$("hcopy").onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(load("optfl.hist")||[],null,1));$("hcopy").textContent="Copied"}catch(e){$("hcopy").textContent="Copy failed"}setTimeout(()=>$("hcopy").textContent="Copy history",2000)};
-let clr=0;$("hclear").onclick=()=>{if(!clr){clr=1;$("hclear").textContent="Tap again to clear";setTimeout(()=>{clr=0;$("hclear").textContent="Clear history"},3000);return}
- store("optfl.hist",[]);clr=0;$("hclear").textContent="Clear history";renderHist()};
-setMode($("mode").value||"manual");renderHist();
+setMode($("mode").value||"manual");
 (function(){const s=load("optfl.data");if(s&&s.route==$("route").value&&s.json){try{const P=prepare();finish(P,s.json,s.meta||{})}catch(e){}}})();
 try{if("serviceWorker" in navigator&&location.protocol==="https:"&&!/claude\.ai|claudeusercontent/.test(location.hostname))navigator.serviceWorker.register("sw.js").catch(()=>{})}catch(e){}

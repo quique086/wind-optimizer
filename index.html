@@ -23,6 +23,7 @@ main{padding:0 calc(12px + env(safe-area-inset-right)) calc(40px + env(safe-area
 .card h2{font-size:14px;margin:0 0 8px;color:var(--am);text-transform:uppercase;letter-spacing:.6px}
 label{display:block;font-size:12px;color:var(--mut);margin:6px 0 2px}
 input,textarea,select{width:100%;background:#0d1117;color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit;font-family:ui-monospace,Menlo,monospace}
+input[type=checkbox]{width:auto;margin-right:6px}
 textarea{min-height:64px;text-transform:uppercase}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
 button{background:var(--cy);color:#001;border:0;border-radius:8px;padding:10px 14px;font-weight:700;font-size:15px;margin-top:10px;cursor:pointer}
@@ -37,52 +38,61 @@ td:first-child,th:first-child{text-align:left}
 tr.best td{color:var(--acc);font-weight:700}
 tr.opt td:first-child::after{content:" OPT";color:var(--mg);font-size:10px}
 tr.dim td{color:#6e7681}
-.bar{display:inline-block;height:8px;border-radius:2px;vertical-align:middle}
 .scroll{overflow-x:auto}
 .big{font-size:22px;font-weight:800;color:var(--acc);font-family:ui-monospace,Menlo,monospace}
 .pill{display:inline-block;border:1px solid var(--line);border-radius:14px;padding:3px 10px;margin:2px;font-family:ui-monospace,Menlo,monospace;color:var(--cy)}
 details summary{cursor:pointer;color:var(--mut);font-size:13px}
+details.card>summary{color:var(--am);font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.6px}
 .note{font-size:12px;color:var(--mut)}
 .seg{display:flex;gap:0;margin-bottom:8px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .segb{flex:1;margin:0;border-radius:0;background:#0d1117;color:var(--mut);font-size:13px;padding:9px 6px}
 .segb.on{background:var(--cy);color:#001}
+.file{display:block;border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center;color:var(--cy);font-weight:700;cursor:pointer}
+.file input{display:none}
 a{color:var(--cy)}
 </style>
 </head>
 <body>
 <header>
 <h1>A320 WIND OPTIMUM FL</h1>
-<div class="sub">GFS upper winds along the route → wind-adjusted best cruise level + the 4 FMS wind levels to enter</div>
+<div class="sub">Forecast winds along the route → wind-adjusted best level, the 4 FMS/uplink wind levels and a step plan</div>
 </header>
 <main>
 
 <div class="card">
-<h2>1 · Route & flight</h2>
-<div class="seg"><button type="button" data-m="manual" class="segb">No datalink · manual winds</button><button type="button" data-m="datalink" class="segb">Datalink · FL to request</button></div>
+<h2>1 · Flight</h2>
+<div class="seg"><button type="button" data-m="manual" class="segb">No datalink · manual winds</button><button type="button" data-m="datalink" class="segb">Datalink · uplink levels</button></div>
 <input id="mode" type="hidden" value="manual">
+<label class="file">Import OFP (PDF)<input id="ofpfile" type="file" accept="application/pdf,.pdf"></label>
+<div id="ofpmsg" class="msg"></div>
 <label>Route — ICAO airports, coordinates or NAME/coords, separated by spaces</label>
 <textarea id="route" placeholder="SCEL S3530.0W07130.0 UMKAL/S3610.0W07215.0 SCIE"></textarea>
 <div class="note">Coordinates: S3347.6W07047.1 · S33W070 · 3347.6S/07047.1W · -33.79,-70.78 · Name a fix with NAME/coords. Airports built in: <span id="aptlist"></span></div>
 <div class="grid">
 <div><label>Departure (UTC)</label><input id="dep" type="datetime-local"></div>
 <div><label>Aircraft</label><select id="actype"><option value="a320ceo">A320 CEO</option><option value="a320neo">A320 neo</option><option value="a321ceo">A321 CEO</option><option value="a321neo">A321 neo</option></select></div>
+<div><label>Takeoff weight (t)</label><input id="tow" type="number" step="0.1" value="70"></div>
 <div><label>Cruise Mach</label><input id="mach" type="number" step="0.01" value="0.78"></div>
-<div><label>OPT FL, no wind</label><input id="opt" type="number" step="10" value="370"></div>
-<div><label>REC MAX FL</label><input id="recmax" type="number" step="10" value="390"></div>
+<div><label>Cost index</label><input id="ci" type="number" step="1" value="0"></div>
+<div><label>OPT at TOW, no wind</label><input id="opt" type="number" step="10" value="350"></div>
+<div><label>REC MAX at TOW</label><input id="recmax" type="number" step="10" value="370"></div>
 <div><label>Lowest FL to check</label><input id="minfl" type="number" step="10" value="250"></div>
+<div><label>Wind model</label><select id="model"><option value="AVG">Average GFS+ECMWF</option><option value="GFS">GFS (NOAA)</option><option value="ECMWF">ECMWF</option></select></div>
 <div style="grid-column:1/-1"><label id="mineLbl">Levels you normally enter (to compare)</label><input id="mine" value="320 340 360 380"></div>
 <div><label>Mag var (° E+, W−)</label><input id="magvar" type="number" step="1" value="0"></div>
 <div><label>Direction levels</label><select id="parity"><option value="auto">Auto (by track)</option><option value="odd">Odd</option><option value="even">Even</option><option value="all">All</option></select></div>
 </div>
 <details style="margin-top:8px"><summary>More settings</summary>
 <div class="grid">
-<div><label>Gross weight (t) → est. OPT</label><input id="gw" type="number" step="0.5" placeholder="e.g. 66"></div>
-<div><label>Cruise FF at OPT (kg/h)</label><input id="ff" type="number" step="50" value="2400"></div>
+<div><label>Average cruise FF (kg/h)</label><input id="ff" type="number" step="50" value="2400"></div>
 <div><label>Climb table scale (%)</label><input id="clf" type="number" step="5" value="100"></div>
 <div><label>Penalty 2000 ft off OPT (%)</label><input id="p2" type="number" step="0.1" value="2"></div>
 <div><label>Penalty 4000 ft off OPT (%)</label><input id="p4" type="number" step="0.1" value="5"></div>
+<div><label>Step climb cost (kg/1000 ft)</label><input id="stepc" type="number" step="5" value="25"></div>
+<div><label>Min. saving for a step (kg)</label><input id="minstep" type="number" step="10" value="40"></div>
 </div>
-<div class="note">The best source for "OPT FL, no wind" is the FMS: read OPT on the PROG page before you enter any winds. The weight estimate is a rough fallback.</div>
+<label style="display:flex;align-items:center;margin-top:8px"><input type="checkbox" id="autocal">Auto-calibrate fuel from post-flight history</label>
+<div class="note">"OPT at TOW, no wind" and "REC MAX at TOW": read them on the FMS (PROG) with the takeoff weight in INIT B and before entering any winds. OPT and REC MAX then rise as fuel burns, at constant weight/pressure ratio.</div>
 </details>
 <div class="row"><button id="go">Get winds &amp; calculate</button><button class="sec" id="reuse">Recalculate</button></div>
 <div id="m1" class="msg"></div>
@@ -99,273 +109,31 @@ a{color:var(--cy)}
 
 <div id="out"></div>
 
+<details class="card" id="pfcard"><summary>Post-flight check</summary>
+<div class="note" style="margin:6px 0">Enter what you actually flew, from the FM postflight report. The tool re-runs its model on your real profile and compares.</div>
+<div class="grid">
+<div><label>Takeoff fuel (t or kg)</label><input id="pf_tof" type="number" step="0.1"></div>
+<div><label>Landing fuel (t or kg)</label><input id="pf_ldf" type="number" step="0.1"></div>
+<div><label>Takeoff time (UTC)</label><input id="pf_to" placeholder="19:54"></div>
+<div><label>Landing time (UTC)</label><input id="pf_ldg" placeholder="01:26"></div>
+<div style="grid-column:1/-1"><label>Levels flown: first FL, then FL/FIX for each change</label><input id="pf_lv" placeholder="340 360/ASEPU"></div>
+</div>
+<label>Optional: fuel on board at fixes (one per line: FIX FOB)</label>
+<textarea id="pf_pts" placeholder="ESNOX 14.5&#10;ATEDA 13.0&#10;IREMI 9.7"></textarea>
+<div class="row"><button id="pfrun">Compare</button><button class="sec" id="pfsave">Save to history</button></div>
+<div id="pfout" class="msg"></div>
+</details>
+
+<details class="card" id="hcard"><summary>History &amp; calibration</summary>
+<div id="hout" class="msg"></div>
+<div class="row"><button class="sec" id="hcopy">Copy history</button><button class="sec" id="hclear">Clear history</button></div>
+</details>
+
 <div class="card note">
-<b>How it works.</b> Winds and temperatures come from the NOAA GFS model through Open-Meteo, at 400/350/300/250/200/150 hPa (about FL236/266/301/340/387/446). They are taken for each point at your estimated time overhead, and interpolated between those levels. For each level the tool computes TAS, ground speed and a fuel index over the cruise part of the route. The fuel index applies a generic Airbus-style off-optimum penalty: about 2% at 2000 ft and 5% at 4000 ft off OPT, matching published A320-family figures (you can change both in More settings). The "FMS levels" pick is the set of 4 levels whose straight-line interpolation (what the FMS does) best matches the full wind profile in your cruise band.<br><br>
-<b>Limits.</b> This is a planning cross-check, not certified performance data. It is not an approved EFB application. The FMS, OFP, ATC and REC MAX/buffet margins always govern. Ground track is great-circle between the points you enter, so add airway fixes for accuracy.
+<b>How it works.</b> Winds and temperatures come from the NOAA GFS and ECMWF models through Open-Meteo (850–150 hPa, about 5,000–44,600 ft), taken at each point at its estimated time overhead and interpolated between levels. Each level is scored over the whole trip: climb (with climb winds), cruise and descent. Cruise fuel follows the weight as fuel burns, and the off-OPT penalty is measured from the OPT for the current weight. The "4 wind levels" are the set whose straight-line interpolation, which is what the FMS does, best matches the forecast profile around the levels that matter.<br><br>
+<b>Limits.</b> Planning cross-check, not certified performance data, and not an approved EFB application. The FMS, OFP, ATC and REC MAX/buffet margins always govern.
 </div>
 </main>
-
-<script>
-"use strict";
-const APT={SCEL:[-33.393,-70.786],SCIE:[-36.7727,-73.0631],SCFA:[-23.4445,-70.4451],SCDA:[-20.5352,-70.1813],SCAR:[-18.3485,-70.3387],SCCF:[-22.4982,-68.9036],SCSE:[-29.9162,-71.1995],SCAT:[-27.2612,-70.7792],SCTE:[-41.4389,-73.094],SCCI:[-53.0026,-70.8546],SCQP:[-38.9259,-72.6515],SCVD:[-39.65,-73.0861],SCJO:[-40.6112,-73.061],SCBA:[-45.9161,-71.6895],SCNT:[-51.6715,-72.5284],SCIP:[-27.1648,-109.4219],SCCH:[-36.5825,-72.0314],SCPQ:[-42.3,-73.7158],
-SAEZ:[-34.8222,-58.5358],SABE:[-34.5592,-58.4156],SAME:[-32.8317,-68.7929],SACO:[-31.3236,-64.208],SAAR:[-32.9036,-60.785],SAZS:[-41.1512,-71.1575],SAWH:[-54.8433,-68.2958],SANT:[-26.8409,-65.1049],SASA:[-24.856,-65.4862],SAZN:[-38.949,-68.1557],
-SPJC:[-12.0219,-77.1143],SPZO:[-13.5357,-71.9388],SPQU:[-16.3411,-71.583],SPTN:[-18.0533,-70.2758],
-SBGR:[-23.4356,-46.4731],SBGL:[-22.81,-43.2506],SBFL:[-27.6703,-48.5525],SBPA:[-29.9944,-51.1714],SBFI:[-25.6003,-54.4872],
-SUMU:[-34.8384,-56.0308],SGAS:[-25.24,-57.5191],SLLP:[-16.5133,-68.1923],SLVR:[-17.6448,-63.1354],SEQM:[-0.1292,-78.3575],SEGU:[-2.1574,-79.8837],SKBO:[4.7016,-74.1469],SKRG:[6.1645,-75.4231],MPTO:[9.0714,-79.3835]};
-const LEVELS=[400,350,300,250,200,150];
-const $=id=>document.getElementById(id);
-const D2R=Math.PI/180,R2D=180/Math.PI,REARTH=3440.065;
-$("aptlist").textContent=Object.keys(APT).join(" ");
-
-function store(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
-function load(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
-
-/* ---------- geometry ---------- */
-function dist(a,b){const[f1,l1]=[a[0]*D2R,a[1]*D2R],[f2,l2]=[b[0]*D2R,b[1]*D2R];
- const h=Math.sin((f2-f1)/2)**2+Math.cos(f1)*Math.cos(f2)*Math.sin((l2-l1)/2)**2;return 2*REARTH*Math.asin(Math.min(1,Math.sqrt(h)))}
-function brg(a,b){const[f1,l1]=[a[0]*D2R,a[1]*D2R],[f2,l2]=[b[0]*D2R,b[1]*D2R];
- const y=Math.sin(l2-l1)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(l2-l1);return(Math.atan2(y,x)*R2D+360)%360}
-function gcInterp(a,b,t){const[f1,l1]=[a[0]*D2R,a[1]*D2R],[f2,l2]=[b[0]*D2R,b[1]*D2R];const d=dist(a,b)/REARTH;if(d<1e-9)return a.slice();
- const A=Math.sin((1-t)*d)/Math.sin(d),B=Math.sin(t*d)/Math.sin(d);
- const x=A*Math.cos(f1)*Math.cos(l1)+B*Math.cos(f2)*Math.cos(l2),y=A*Math.cos(f1)*Math.sin(l1)+B*Math.cos(f2)*Math.sin(l2),z=A*Math.sin(f1)+B*Math.sin(f2);
- return[Math.atan2(z,Math.hypot(x,y))*R2D,Math.atan2(y,x)*R2D]}
-
-/* ---------- route parsing ---------- */
-function parseCoord(s){let m;
- if(m=s.match(/^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/))return[+m[1],+m[2]];
- if(m=s.match(/^([NS])(\d{2})(\d{2}(?:\.\d+)?)?([EW])(\d{3})(\d{2}(?:\.\d+)?)?$/)){
-  const la=(+m[2]+(m[3]?+m[3]/60:0))*(m[1]=="S"?-1:1),lo=(+m[5]+(m[6]?+m[6]/60:0))*(m[4]=="W"?-1:1);return[la,lo]}
- if(m=s.match(/^(\d{2})(\d{2}(?:\.\d+)?)?([NS])\/?(\d{3})(\d{2}(?:\.\d+)?)?([EW])$/)){
-  const la=(+m[1]+(m[2]?+m[2]/60:0))*(m[3]=="S"?-1:1),lo=(+m[4]+(m[5]?+m[5]/60:0))*(m[6]=="W"?-1:1);return[la,lo]}
- return null}
-function parseRoute(txt){const toks=txt.toUpperCase().trim().split(/\s+/).filter(Boolean);const pts=[],bad=[];
- for(const t of toks){let name=t,c=null;
-  if(t.includes("/")&&/^[A-Z0-9]{2,7}\//.test(t)&&!parseCoord(t)){const i=t.indexOf("/");name=t.slice(0,i);c=parseCoord(t.slice(i+1))}
-  else if(APT[t])c=APT[t];else{c=parseCoord(t);if(c)name=t.length>10?fmtLL(c):t}
-  if(c&&Math.abs(c[0])<=90&&Math.abs(c[1])<=180)pts.push({name,lat:c[0],lon:c[1],apt:!!APT[t]});else bad.push(t)}
- return{pts,bad}}
-function fmtLL(c){const la=Math.abs(c[0]),lo=Math.abs(c[1]);return(c[0]<0?"S":"N")+String(Math.floor(la)).padStart(2,"0")+((la%1)*60).toFixed(0).padStart(2,"0")+(c[1]<0?"W":"E")+String(Math.floor(lo)).padStart(3,"0")+((lo%1)*60).toFixed(0).padStart(2,"0")}
-
-/* sample route every ~step NM; keep user points */
-function sampleRoute(pts,step){const out=[];let cum=0;
- for(let i=0;i<pts.length-1;i++){const a=[pts[i].lat,pts[i].lon],b=[pts[i+1].lat,pts[i+1].lon],d=dist(a,b),n=Math.max(1,Math.ceil(d/step));
-  for(let k=0;k<n;k++){const t=k/n,p=gcInterp(a,b,t),nx=gcInterp(a,b,Math.min(1,t+0.5/n));
-   out.push({lat:p[0],lon:p[1],cum:cum+d*t,trk:brg(p,nx),name:k==0?pts[i].name:null,user:k==0,apt:k==0&&pts[i].apt})}
-  cum+=d}
- const L=pts[pts.length-1],P=pts[pts.length-2];
- out.push({lat:L.lat,lon:L.lon,cum,trk:brg([P.lat,P.lon],[L.lat,L.lon]),name:L.name,user:true,apt:L.apt});
- return{samples:out,total:cum}}
-
-/* ---------- atmosphere ---------- */
-function hpaToFt(p){return p>=226.32?(1-Math.pow(p/1013.25,0.190263))*145366.45:36089.24+20805.8*Math.log(226.3206/p)}
-function isaT(ft){return ft<=36089?15-1.98*ft/1000:-56.5}
-const LV_FT=LEVELS.map(hpaToFt);
-
-/* ---------- forecast URL ---------- */
-function isoH(d){return d.toISOString().slice(0,13)+":00"}
-function buildUrl(samples,depUTC){const vars=[];for(const L of LEVELS)vars.push("wind_speed_"+L+"hPa","wind_direction_"+L+"hPa","temperature_"+L+"hPa");
- const lastH=new Date(depUTC.getTime()+(samples[samples.length-1].cum/420+2)*3600e3),firstH=new Date(depUTC.getTime()-3600e3);
- return"https://api.open-meteo.com/v1/forecast?latitude="+samples.map(s=>s.lat.toFixed(3)).join(",")+"&longitude="+samples.map(s=>s.lon.toFixed(3)).join(",")+
- "&hourly="+vars.join(",")+"&wind_speed_unit=kn&models=gfs_seamless&timezone=GMT&start_hour="+isoH(firstH)+"&end_hour="+isoH(lastH)}
-
-/* ---------- build wind profiles from forecast ---------- */
-function attachWx(samples,json,depUTC){const arr=Array.isArray(json)?json:[json];
- if(arr.length!==samples.length)throw new Error("Data has "+arr.length+" points, route has "+samples.length+". Recalculate with the same route that made the link.");
- let maxDt=0;
- samples.forEach((s,i)=>{const h=arr[i].hourly;if(!h||!h.time)throw new Error("Unexpected data format");
-  const eta=depUTC.getTime()+s.cum/440*3600e3;let bi=0,bd=1e18;
-  h.time.forEach((t,j)=>{const dt=Math.abs(Date.parse(t+(t.length<=16?":00Z":""))-eta);if(dt<bd){bd=dt;bi=j}});
-  maxDt=Math.max(maxDt,bd);
-  s.prof=[];LEVELS.forEach((L,k)=>{const sp=h["wind_speed_"+L+"hPa"],dr=h["wind_direction_"+L+"hPa"],tp=h["temperature_"+L+"hPa"];
-   if(sp&&dr&&tp&&sp[bi]!=null&&dr[bi]!=null&&tp[bi]!=null){const th=dr[bi]*D2R;s.prof.push({ft:LV_FT[k],u:-sp[bi]*Math.sin(th),v:-sp[bi]*Math.cos(th),T:tp[bi]})}});
-  s.prof.sort((a,b)=>a.ft-b.ft);if(s.prof.length<2)throw new Error("Not enough levels in data at point "+(i+1))});
- return maxDt/3600e3}
-function interpProf(prof,ft){if(ft<=prof[0].ft)return prof[0];const n=prof.length;if(ft>=prof[n-1].ft)return prof[n-1];
- for(let i=0;i<n-1;i++){const a=prof[i],b=prof[i+1];if(ft<=b.ft){const t=(ft-a.ft)/(b.ft-a.ft);return{u:a.u+t*(b.u-a.u),v:a.v+t*(b.v-a.v),T:a.T+t*(b.T-a.T)}}}}
-/* FMS-style: linear between entered levels, held constant outside them */
-function fmsProf(prof,lvls){return lvls.map(fl=>{const w=interpProf(prof,fl*100);return{ft:fl*100,u:w.u,v:w.v,T:w.T}})}
-
-/* ---------- performance ---------- */
-function penaltyFn(p2,p4){const a=(p4-2*p2)/8/100,b=(p2/100-4*a)/2;return dk=>{const d=Math.abs(dk);return Math.max(0,a*d*d+b*d)}}
-/* generic A320 climb from brake release (mid weight, ISA, still air): FL -> [NM, min, kg] */
-const CLB=[[100,18,5,500],[200,45,11,850],[250,65,14,1000],[290,85,17,1150],[330,110,21,1350],[350,125,23,1450],[370,145,26,1600],[390,175,31,1800],[410,210,37,2050]];
-/* generic type factors vs A320 CEO: climb dist/time, climb fuel, descent dist/time, descent fuel, typical cruise FF, OPT-vs-weight helper */
-const AC={a320ceo:{cd:1,cf:1,dd:1,df:1,ff:2400,w0:70},a320neo:{cd:1,cf:0.85,dd:1,df:0.9,ff:2100,w0:70},
- a321ceo:{cd:1.15,cf:1.25,dd:1.05,df:1.1,ff:2750,w0:80},a321neo:{cd:1.15,cf:1.06,dd:1.05,df:1,ff:2400,w0:80}};
-function acOf(cfg){return AC[cfg.ac]||AC.a320ceo}
-function climbOf(fl,cfg){const k=(cfg.clf||100)/100,A=acOf(cfg);let i=0;while(i<CLB.length-2&&fl>CLB[i+1][0])i++;const a=CLB[i],b=CLB[i+1],t=(fl-a[0])/(b[0]-a[0]);
- const L=j=>a[j]+t*(b[j]-a[j]);return{d:L(1)*k*A.cd,t:L(2)*k*A.cd/60,f:L(3)*k*A.cf}}
-function descOf(fl,cfg){const k=fl/10,A=acOf(cfg||{});return{d:(3.2*k+10)*A.dd,t:(0.45*k+6)*A.dd/60,f:(150+5*k)*A.df}}
-function evalLevels(cruise,flList,cfg,windSrc,trip){const pen=penaltyFn(cfg.p2,cfg.p4),TASstd=cfg.mach*573.57;
- return flList.map(fl=>{let time=0,fuel=0,dsum=0,tw=0,isa=0,tasS=0,lo=-1e9,hi=1e9,cl=null,de=null;
-  if(trip){cl=climbOf(fl,cfg);de=descOf(fl,cfg);lo=cl.d;hi=cfg.total-de.d;if(hi-lo<15)return{fl,bad:true}}
-  for(const s of cruise){const d=trip?Math.max(0,Math.min(s.a1,hi)-Math.max(s.a0,lo)):s.seg;if(d<=0)continue;const prof=windSrc?windSrc(s):s.prof;const w=interpProf(prof,fl*100),t=s.trk*D2R;
-   const along=w.u*Math.sin(t)+w.v*Math.cos(t),cross=w.u*Math.cos(t)-w.v*Math.sin(t);
-   const tas=cfg.mach*38.967854*Math.sqrt(w.T+273.15),gs=Math.sqrt(Math.max(tas*tas-cross*cross,1))+along;
-   const hrs=d/Math.max(gs,150);time+=hrs;fuel+=cfg.ff*(1+pen((fl-cfg.opt)/10))*(tas/TASstd)*hrs;dsum+=d;tw+=along*d;isa+=(w.T-isaT(fl*100))*d;tasS+=tas*d}
-  const xf=cl?cl.f+de.f:0,xt=cl?cl.t+de.t:0;
-  return{fl,time:time+xt,fuel:fuel+xf,cfuel:fuel,ctime:time,cgs:dsum/time,cdist:dsum,xf,tw:tw/dsum,isa:isa/dsum,tas:tasS/dsum,gs:dsum/time}})}
-
-/* choose 4 FMS wind levels whose linear interpolation best reproduces the profile over the band */
-function pickFmsLevels(cruise,band,wts,must){const cands=[];for(let f=200;f<=410;f+=10)cands.push(f);let best=null;
- const wsum=cruise.reduce((a,s)=>a+s.seg,0);
- const errOf=lv=>{let mx=0,tot=0,ws=0;for(const fl of band){let e=0;for(const s of cruise){if(s.seg<=0)continue;
-   const tr=interpProf(s.prof,fl*100);
-   const fp=s._cache[lv.join()]||(s._cache[lv.join()]=fmsProf(s.prof,lv));const fw=interpProf(fp,fl*100);
-   e+=Math.hypot(tr.u-fw.u,tr.v-fw.v)*s.seg}e/=wsum;const w=wts[fl]??0.2;mx=Math.max(mx,w*e);tot+=w*e;ws+=w}return mx+0.25*tot/ws};
- cruise.forEach(s=>s._cache={});
- for(let i=0;i<cands.length;i++)for(let j=i+1;j<cands.length;j++)for(let k=j+1;k<cands.length;k++)for(let l=k+1;l<cands.length;l++){
-  const lv=[cands[i],cands[j],cands[k],cands[l]];if(lv[0]>must||lv[3]<must||lv[3]<band[band.length-1]-40||lv[0]>band[0]+40)continue;
-  const e=errOf(lv);if(!best||e<best.e-1e-9)best={lv,e}}
- cruise.forEach(s=>{delete s._cache});return best}
-function profErr(cruise,band,lv){const wsum=cruise.reduce((a,s)=>a+s.seg,0);let mx=0;
- for(const fl of band){let e=0;for(const s of cruise){if(s.seg<=0)continue;const tr=interpProf(s.prof,fl*100),fw=interpProf(fmsProf(s.prof,lv),fl*100);e+=Math.hypot(tr.u-fw.u,tr.v-fw.v)*s.seg}mx=Math.max(mx,e/wsum)}return mx}
-
-/* ---------- helpers ---------- */
-function windStr(w){const s=Math.hypot(w.u,w.v);let d=(Math.atan2(-w.u,-w.v)*R2D+360)%360;d=Math.round(d)%360||360;
- return String(d).padStart(3,"0")+"/"+String(Math.round(s)).padStart(3,"0")}
-function hm(h){const m=Math.round(h*60);return Math.floor(m/60)+":"+String(m%60).padStart(2,"0")}
-function sgn(x,dp=0){const v=x.toFixed(dp);return +v==0?(0).toFixed(dp):(x>0?"+":"")+v}
-function cfg(){const g=id=>parseFloat($(id).value);return{mach:g("mach"),opt:g("opt"),recmax:g("recmax"),minfl:g("minfl"),ff:g("ff"),clf:g("clf")||100,ac:$("actype").value,p2:g("p2"),p4:g("p4"),parity:$("parity").value,magvar:g("magvar")||0,mode:$("mode").value,
- mine:$("mine").value.split(/[\s,]+/).map(Number).filter(x=>x>=100&&x<=450).slice(0,4)}}
-function depDate(){const v=$("dep").value;return v?new Date(v+":00Z"):new Date()}
-
-/* ---------- main flow ---------- */
-let STATE=null;
-function prepare(){const{pts,bad}=parseRoute($("route").value);
- if(bad.length)throw new Error("Unknown: "+bad.join(" ")+"\nUse coordinates (e.g. S3530.0W07130.0) or NAME/coords.");
- if(pts.length<2)throw new Error("Enter at least two points.");
- const{samples,total}=sampleRoute(pts,100);if(samples.length>90)throw new Error("Route too long for one request.");
- return{pts,samples,total,dep:depDate(),route:$("route").value}}
-
-async function go(){$("m1").className="msg";$("m1").textContent="Fetching GFS winds…";$("paste").style.display="none";
- let P;try{P=prepare()}catch(e){$("m1").className="msg err";$("m1").textContent=e.message;return}
- const url=buildUrl(P.samples,P.dep);saveInputs();
- try{const r=await fetch(url);if(!r.ok)throw new Error("HTTP "+r.status+" "+(await r.text()).slice(0,200));const j=await r.json();finish(P,j)}
- catch(e){STATE={P,json:null};$("dlink").href=url;$("paste").style.display="block";
-  $("m1").className="msg warn";$("m1").textContent="Automatic download blocked ("+(e.message||e)+"). Use the two steps below."}}
-function finish(P,json){try{const age=attachWx(P.samples,json,P.dep);STATE={P,json};store("optfl.data",{route:P.route,dep:P.dep.toISOString(),json});
-  $("m1").className="msg ok";$("m1").textContent="Winds loaded for "+P.samples.length+" points"+(age>1.5?" (closest forecast hour is "+age.toFixed(1)+" h from ETA. Check departure time)":"")+".";render(P)}
- catch(e){$("m1").className="msg err";$("m1").textContent=e.message}}
-
-function render(P){const c=cfg(),S=P.samples;
- for(let i=0;i<S.length;i++){const a=i>0?(S[i].cum-S[i-1].cum)/2:0,b=i<S.length-1?(S[i+1].cum-S[i].cum)/2:0;S[i].seg=a+b;S[i].a0=S[i].cum-a;S[i].a1=S[i].cum+b}
- c.total=P.total;
- const overall=brg([P.pts[0].lat,P.pts[0].lon],[P.pts[P.pts.length-1].lat,P.pts[P.pts.length-1].lon]);
- const magTrk=(overall-c.magvar+360)%360,par=c.parity=="auto"?(magTrk<180?"odd":"even"):c.parity;
- const all=[];for(let f=c.minfl;f<=c.recmax;f+=10)all.push(f);
- const show=all.filter(f=>par=="all"||((f/10)%2==1)==(par=="odd"));
- const res=evalLevels(S,all,c,null,true).filter(r=>!r.bad);const shown=res.filter(r=>show.includes(r.fl));
- if(!shown.length){$("out").innerHTML='<div class="card err">No level fits: route too short for these levels, or check Lowest FL / REC MAX.</div>';return}
- const tooHigh=all.filter(f=>show.includes(f)&&!res.find(r=>r.fl==f)&&f>c.minfl);
- const bestF=shown.reduce((a,b)=>b.fuel<a.fuel?b:a),bestT=shown.reduce((a,b)=>b.time<a.time?b:a);
- const ref=res.find(r=>r.fl==c.opt)||res.reduce((a,b)=>Math.abs(b.fl-c.opt)<Math.abs(a.fl-c.opt)?b:a),penF=penaltyFn(c.p2,c.p4);
- const bcl=climbOf(bestF.fl,c).d,bde=descOf(bestF.fl,c).d;
- let cruise=S.filter(s=>s.cum>=bcl&&s.cum<=P.total-bde);if(!cruise.length)cruise=[S[Math.floor(S.length/2)]];
- const optRow=shown.find(r=>r.fl==c.opt)||shown.reduce((a,b)=>Math.abs(b.fl-c.opt)<Math.abs(a.fl-c.opt)?b:a);
- 
- /* FMS pick */
- const band=all.filter(f=>f>=Math.max(c.minfl,Math.min(bestF.fl,c.opt)-60));const wts={};
- res.forEach(r=>{wts[r.fl]=1/(1+Math.max(0,r.fuel-bestF.fuel)/150)});const pick=pickFmsLevels(cruise,band,wts,bestF.fl);
- let mineHtml="";
- if(c.mine.length>=2){const lv=c.mine.slice().sort((a,b)=>a-b);
-  const perc=evalLevels(S,all,c,s=>fmsProf(s.prof,lv),true).filter(r=>!r.bad&&show.includes(r.fl));const pb=perc.reduce((a,b)=>b.fuel<a.fuel?b:a);
-  const trueAtPb=shown.find(r=>r.fl==pb.fl)||bestF;
-  mineHtml=`<p style="font-size:13px">With winds ${c.mode=="datalink"?"uplinked":"entered"} only at <b>${lv.map(f=>"FL"+f).join(" ")}</b>, the FMS sees a best of <b>FL${pb.fl}</b>. Errors reach ${profErr(cruise,band,lv).toFixed(0)} kt in your band.${pb.fl!=bestF.fl?` With the real profile the best is <b>FL${bestF.fl}</b>. Flying FL${pb.fl} costs ≈${Math.round(trueAtPb.fuel-bestF.fuel)} kg and ${sgn((trueAtPb.time-bestF.time)*60)} min.`:" Same answer as the real profile."}</p>`}
- /* waypoint entries */
- const wps=cruise.filter(s=>s.user&&!s.apt&&s.name);
- let wpRows="";const lv=pick.lv;
- if(wps.length){wpRows=wps.map(s=>`<tr><td>${s.name}</td>${lv.map(f=>`<td>${windStr(interpProf(s.prof,f*100))}</td>`).join("")}</tr>`).join("")}
- else{const avg=lv.map(f=>{let u=0,v=0,w=0;for(const s of cruise){const x=interpProf(s.prof,f*100);u+=x.u*s.seg;v+=x.v*s.seg;w+=s.seg}return{u:u/w,v:v/w}});
-  wpRows=`<tr><td>Route avg</td>${avg.map(x=>`<td>${windStr(x)}</td>`).join("")}</tr>`}
- const save=Math.round(optRow.fuel-bestF.fuel),tsave=(optRow.time-bestF.time)*60;
- $("out").innerHTML=`
-<div class="card"><h2>2 · Result</h2>
-<div class="row" style="justify-content:space-between"><div><div class="note">Best fuel level</div><div class="big">FL${bestF.fl}</div></div>
-<div><div class="note">Fastest</div><div class="big" style="color:var(--cy)">FL${bestT.fl}</div></div>
-<div><div class="note">vs FL${optRow.fl} (no-wind OPT)</div><div class="big" style="color:${save>0?"var(--acc)":"var(--mut)"}">${save>0?"−"+save+" kg":"—"}</div><div class="note">${Math.abs(tsave)<0.5?"same time":(tsave>0?Math.round(tsave)+" min faster":Math.round(-tsave)+" min slower")}</div></div></div>
-<p class="note">Trip ${Math.round(P.total)} NM · cruise at FL${bestF.fl} ≈${Math.round(bestF.cdist)} NM${tooHigh.length?" · too short for "+tooHigh.map(f=>"FL"+f).join(", "):""} · best picked from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3,"0")}°${c.parity=="auto"?"":" · forced"}). Grey rows are the other direction, shown for reference · fuel figures are relative estimates</p>
-<div class="scroll"><table><tr><th>FL</th><th>WIND</th><th>HAVE</th><th>NEED</th><th>ISA</th><th>GS</th><th>TIME</th><th>TRIP kg</th><th>Δ kg</th></tr>
-${res.slice().reverse().map(r=>{const d=r.fuel-bestF.fuel,isRef=r.fl==ref.fl,have=r.tw-ref.tw,rem=ref.fuel-r.xf,need=rem>0?r.tw+(r.cfuel*r.cgs/rem-r.cgs)-ref.tw:NaN;return`<tr class="${r===bestF?"best":""} ${r.fl==c.opt?"opt":""} ${show.includes(r.fl)?"":"dim"}"><td>FL${r.fl}</td>
-<td style="color:${r.tw>=0?"var(--acc)":"var(--rd)"}">${sgn(r.tw)}</td><td>${isRef?"ref":sgn(have)}</td><td style="color:${isRef?"inherit":have>=need?"var(--acc)":"var(--mut)"}">${isRef?"—":isFinite(need)?sgn(need):"n/a"}</td><td>${sgn(r.isa)}</td><td>${Math.round(r.gs)}</td><td>${hm(r.time)}</td><td>${Math.round(r.fuel)}</td><td>${r===bestF?"best":d<0?"−"+Math.round(-d):"+"+Math.round(d)}</td></tr>`}).join("")}
-</table></div><div class="note">WIND = average tail(+)/head(−) component over the cruise portion. HAVE = how much better (+) or worse (−) the wind is than at your OPT. NEED = how much better it must be to pay for flying off OPT. A level beats OPT only when HAVE ≥ NEED (green). TRIP = climb + cruise + descent, so a lower level gets credit for the shorter climb and a higher level for the longer, cheap descent. Climb and descent use generic figures for the selected aircraft, adjustable with "Climb table scale".<br><b>Use the no-wind OPT</b>, read from PROG before entering winds. The FMS OPT after winds are entered already includes them, so the wind would be counted twice.</div></div>
-
-${c.mode=="datalink"?datalinkHtml(P,cruise,all,show,c,shown,bestF,mineHtml,pick,band):`<div class="card"><h2>3 · Enter these winds in the FMS</h2>
-<div>${lv.map(f=>`<span class="pill">FL${f}</span>`).join("")}</div>
-<p class="note">These 4 levels let the FMS's interpolation match the forecast profile from FL${band[0]} to FL${band[band.length-1]} within ≈${pick.e.toFixed(0)} kt.</p>
-<div class="scroll"><table><tr><th>WPT</th>${lv.map(f=>`<th>FL${f}</th>`).join("")}</tr>${wpRows}</table></div>
-${wps.length?"":`<p class="note">No en-route fixes in the cruise portion, so these are route averages: enter them at your first cruise waypoint and let them propagate. Add fixes to the route for per-waypoint winds.</p>`}
-${mineHtml}
-</div>`}
-
-<div class="card"><h2>Wind profile (cruise average)</h2>${profileSvg(cruise,all,lv,c.mine)}</div>`}
-
-function datalinkHtml(P,cruise,all,show,c,shown,bestF,mineHtml,pick,band){
- const ranked=shown.slice().sort((a,b)=>a.fuel-b.fuel),top=ranked.slice(0,4),fastest=shown.reduce((a,b)=>b.time<a.time?b:a);
- const cl=cruise.reduce((a,s)=>a+s.seg,0);
- let plan="";
- if(cl>=250){const L=Math.max(150,cl/4),groups=[];let g=[],start=cruise[0].cum;
-  for(const s of cruise){if(s.cum-start>=L&&g.length){groups.push(g);g=[];start=s.cum}g.push(s)}if(g.length){const last=groups[groups.length-1];if(last&&g[g.length-1].cum-g[0].cum<L/2)groups[groups.length-1]=last.concat(g);else groups.push(g)}
-  const rows=groups.map(gr=>{const burned=c.ff*(gr[0].cum/440)/1000,lopt=c.opt+burned*3.3;
-   const r=evalLevels(gr,all,Object.assign({},c,{opt:lopt})).filter(x=>show.includes(x.fl));const b=r.reduce((a,x)=>x.fuel<a.fuel?x:a);const stay=r.find(x=>x.fl==bestF.fl);
-   const nm=gr.find(s=>s.name&&!s.apt);return{from:Math.round(gr[0].cum),to:Math.round(gr[gr.length-1].cum),wp:nm?nm.name:"",fl:b.fl,gain:stay?stay.fuel-b.fuel:0}});
-  const same=rows.every(r=>r.fl==bestF.fl||r.gain<20);
-  plan=same?`<h2 style="margin-top:14px">Step plan</h2><p style="font-size:13px">No step worth requesting: <b>FL${bestF.fl}</b> stays best for the whole cruise (any step saves under 20 kg).</p>`:`<h2 style="margin-top:14px">Step plan</h2><div class="scroll"><table><tr><th>ROUTE NM</th><th>FIX</th><th>BEST</th><th>vs FL${bestF.fl}</th></tr>
-${rows.map(r=>`<tr class="${r.fl!=bestF.fl&&r.gain>=20?"best":""}"><td>${r.from}–${r.to}</td><td>${r.wp}</td><td>FL${r.fl}</td><td>${r.fl==bestF.fl||r.gain<0.5?"—":"−"+Math.round(r.gain)+" kg"}</td></tr>`).join("")}</table></div>
-<p class="note">Best level per part of the cruise. OPT rises as fuel burns (≈330 ft per tonne). Highlighted rows save ≥20 kg in that part, so a step there is worth asking for.</p>`}
- else plan=`<p class="note">Short cruise. A single level is the plan.</p>`;
- return`<div class="card"><h2>3 · Request wind uplink at</h2>
-<div>${pick.lv.map(f=>`<span class="pill" style="font-size:20px;padding:6px 14px">FL${f}</span>`).join("")}</div>
-<p style="font-size:13px">With winds at these 4 levels at every waypoint, the FMS's interpolation matches the forecast profile within ≈${profErr(cruise,band,pick.lv).toFixed(0)} kt from FL${band[0]} to FL${band[band.length-1]}. The fit is tightest around the levels that are in play (best ≈ FL${bestF.fl}), and the set always brackets it, so the OPT the FMS computes after the uplink can be trusted.</p>
-${mineHtml||`<p class="note">Type the 4 levels you usually request above to see what they would do to the FMS OPT.</p>`}
-</div>
-<div class="card"><details><summary style="font-size:14px;color:var(--am);font-weight:700">ALSO: FL TO REQUEST FROM ATC</summary>
-<h2 style="margin-top:12px">Request order</h2>
-<div class="scroll"><table><tr><th>#</th><th>FL</th><th>FUEL</th><th>TIME</th><th>WIND</th></tr>
-${top.map((a,i)=>`<tr class="${i==0?"best":""}"><td>${i+1}</td><td>FL${a.fl}</td><td>${i==0?"best":"+"+Math.round(a.fuel-bestF.fuel)+" kg"}</td><td>${i==0?hm(a.time):sgn((a.time-bestF.time)*60)+" min"}</td><td>${sgn(a.tw)} kt</td></tr>`).join("")}
-</table></div>
-${fastest.fl!=bestF.fl?`<p style="font-size:13px">If you're late, <b>FL${fastest.fl}</b> is fastest: ${Math.round((bestF.time-fastest.time)*60)} min saved for +${Math.round(fastest.fuel-bestF.fuel)} kg.</p>`:""}
-${plan}</details></div>`}
-
-function profileSvg(cruise,all,lv,mine){const fls=[];for(let f=200;f<=410;f+=10)fls.push(f);
- const wsum=cruise.reduce((a,s)=>a+s.seg,0);
- const comp=(src)=>fls.map(fl=>{let t=0;for(const s of cruise){const w=interpProf(src(s),fl*100),tr=s.trk*D2R;t+=(w.u*Math.sin(tr)+w.v*Math.cos(tr))*s.seg}return t/wsum});
- const real=comp(s=>s.prof),fms=lv?comp(s=>fmsProf(s.prof,lv)):[],mn=mine.length>=2?comp(s=>fmsProf(s.prof,mine.slice().sort((a,b)=>a-b))):null;
- const vals=real.concat(fms,mn||[]),lo=Math.min(0,...vals)-5,hi=Math.max(0,...vals)+5;
- const W=340,H=260,x=v=>30+(v-lo)/(hi-lo)*(W-40),y=f=>H-20-(f-200)/210*(H-30);
- const path=a=>a.map((v,i)=>(i?"L":"M")+x(v).toFixed(1)+","+y(fls[i]).toFixed(1)).join("");
- let g="";for(let f=200;f<=400;f+=40)g+=`<line x1="30" x2="${W-10}" y1="${y(f)}" y2="${y(f)}" stroke="#30363d"/><text x="2" y="${y(f)+4}" fill="#8b949e" font-size="10">${f}</text>`;
- g+=`<line x1="${x(0)}" x2="${x(0)}" y1="10" y2="${H-20}" stroke="#8b949e" stroke-dasharray="3 3"/>`;
- g+=`<text x="${x(lo)}" y="${H-5}" fill="#8b949e" font-size="10">${Math.round(lo)} kt</text><text x="${x(hi)-30}" y="${H-5}" fill="#8b949e" font-size="10">+${Math.round(hi)} kt</text>`;
- return`<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:520px">${g}
-<path d="${path(real)}" fill="none" stroke="#3fb950" stroke-width="2.5"/>${lv?`<path d="${path(fms)}" fill="none" stroke="#39c5cf" stroke-width="1.5" stroke-dasharray="5 3"/>`:""}
-${mn?`<path d="${path(mn)}" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="2 3"/>`:""}</svg>
-<div class="note"><span style="color:#3fb950">━</span> forecast tail(+)/head(−) wind ${lv?` · <span style="color:#39c5cf">╌</span> what FMS sees with recommended levels`:""}${mn?` · <span style="color:#f85149">┈</span> with your levels`:""}</div>`}
-
-/* ---------- inputs persistence ---------- */
-const IDS=["actype","mode","route","dep","mach","opt","recmax","minfl","parity","gw","ff","clf","magvar","p2","p4","mine"];
-function saveInputs(){const o={};IDS.forEach(i=>o[i]=$(i).value);store("optfl.in",o)}
-(function init(){const o=load("optfl.in");if(o)IDS.forEach(i=>{if(o[i]!=null&&o[i]!=="")$(i).value=o[i]});
- if(!$("dep").value){const d=new Date(Date.now()+3600e3);d.setUTCMinutes(0,0,0);$("dep").value=d.toISOString().slice(0,16)}})();
-
-$("gw").addEventListener("change",()=>{const w=parseFloat($("gw").value);if(!(w>40))return;
- let f=350+(AC[$("actype").value].w0-w)*3.3;f=Math.max(290,Math.min(398,f));$("opt").value=Math.round(f/10)*10})
-function setMode(m){$("mode").value=m;document.querySelectorAll(".segb").forEach(b=>b.classList.toggle("on",b.dataset.m==m));
- $("mineLbl").textContent=m=="datalink"?"Levels you usually request in the uplink (to compare)":"Levels you normally enter (to compare)";
- if(STATE&&STATE.json)try{render(STATE.P)}catch(e){} saveInputs()}
-document.querySelectorAll(".segb").forEach(b=>b.onclick=()=>setMode(b.dataset.m));
-$("actype").addEventListener("change",()=>{$("ff").value=AC[$("actype").value].ff;saveInputs();if(STATE&&STATE.json)try{render(STATE.P)}catch(e){}});
-$("go").onclick=go;
-$("usepaste").onclick=()=>{if(!STATE)return;let j;try{j=JSON.parse($("pj").value.trim())}catch(e){$("m1").className="msg err";$("m1").textContent="That doesn't look like the forecast data. Copy the whole page.";return}
- $("paste").style.display="none";finish(STATE.P,j)};
-$("reuse").onclick=()=>{saveInputs();let P;try{P=prepare()}catch(e){$("m1").className="msg err";$("m1").textContent=e.message;return}
- const json=STATE&&STATE.json||(()=>{const s=load("optfl.data");return s&&s.route==P.route?s.json:null})();
- if(!json){$("m1").className="msg warn";$("m1").textContent="No wind data for this route yet. Tap Get winds.";return}finish(P,json)};
-setMode($("mode").value||"manual");
-/* auto-restore last result (works offline) */
-(function(){const s=load("optfl.data");if(s&&s.route==$("route").value&&s.json){try{const P=prepare();finish(P,s.json)}catch(e){}}})();
-/* offline app shell when installed from a normal website */
-try{if("serviceWorker" in navigator&&location.protocol==="https:"&&!/claude\.ai|claudeusercontent/.test(location.hostname))navigator.serviceWorker.register("sw.js").catch(()=>{})}catch(e){}
-</script>
+<script src="app.js"></script>
 </body>
 </html>

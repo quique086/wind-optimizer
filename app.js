@@ -49,7 +49,7 @@
  * ========================================================================== */
 
 /** App version, shown in the title and used to force browsers to load new files. */
-const APPV = "2.11";
+const APPV = "2.13";
 
 /** Shows an error message in the status line under the "Get winds" button. */
 function showErr(message) {
@@ -563,6 +563,17 @@ function acOf(c) {
  * (relative to the type's reference, limited to 0.85–1.25) and "Climb table scale".
  */
 function climbOf(fl, c) {
+  const r = climbRaw(fl, c);
+  // "Climb fuel correction": kg to add at FL350 for this aircraft type, applied to
+  // every level in proportion to its climb fuel (so it is −200 kg at FL350, about
+  // −100 kg at FL200 ...). Distance and time are not changed.
+  const corr = c.clcorr || 0;
+  if (corr) r.f *= Math.max(0.5, 1 + corr / climbRaw(350, c).f);
+  return r;
+}
+
+/** Climb from the FCOM table or the generic model, before the fuel correction. */
+function climbRaw(fl, c) {
   const scale = (c.clf || 100) / 100;
   const T = tablesFor(c);
   if (T && T.climb) {
@@ -1266,7 +1277,7 @@ function vecAvg(S, s0, s1, ft) {
 
 /** Form fields saved on the device and restored at start-up. */
 const IDS = ["actype", "mode", "route", "dep", "tow", "mach", "ci", "opt", "recmax", "recm",
-  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
+  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "pfac", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
 
 /** Saves all form fields. */
 function saveInputs() {
@@ -1289,6 +1300,8 @@ function cfg() {
     minfl: num("minfl"),                                  // lowest level to check
     ff: num("ff"),                                        // average cruise FF (kg/h)
     clf: num("clf") || 100,                               // climb table scale (%)
+    clcorr: num("clcorr") || 0,                           // climb fuel correction at FL350 (kg, this type)
+    pfac: num("pfac") || 0,                               // perf factor / fuel bias (%), FCOM tables only
     p2: num("p2"), p4: num("p4"),                         // off-OPT penalties (%)
     recm: isFinite(num("recm")) ? Math.max(0, num("recm")) : 2000,   // margin below REC MAX (ft)
     stepc: isFinite(num("stepc")) ? num("stepc") : 25,               // step climb cost (kg/1000 ft)
@@ -1479,6 +1492,10 @@ function render(P) {
     }
   }
   c.tasRef = tasRefOf(S, c);
+  // FCOM tables are book values for a new aircraft: apply the aircraft's
+  // perf factor (FMS PERF FACTOR, or a fuel bias) to all fuel. The generic
+  // model doesn't need it: its fuel flow comes from the OFP, already biased.
+  if (tablesInUse(c).length && c.pfac) c.cal = 1 + c.pfac / 100;
 
   // Direction of flight -> odd or even levels.
   const first = P.pts[0], lastPt = P.pts[P.pts.length - 1];
@@ -1791,7 +1808,7 @@ ${c.ci ? "" : `<td>${sgn(r.isa)}</td>`}<td>${Math.round(r.cgs)}</td><td>${hm(r.t
   <div><div class="note">Fastest</div><div class="big" style="color:var(--cy)">FL${bestT.fl}</div></div>
   <div><div class="note">vs FL${ref.fl} (no-wind OPT)</div><div class="big" style="color:${save > 0 ? "var(--acc)" : "var(--mut)"}">${save > 0.5 ? "−" + kg(save) + " kg" : "—"}</div><div class="note">${Math.abs(tsave) < 0.5 ? "same time" : (tsave > 0 ? Math.round(tsave) + " min faster" : Math.round(-tsave) + " min slower")}</div></div>
 </div>
-<p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${modelName} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3, "0")}°). Grey rows are the other direction${tooHigh.length ? " · too short for " + tooHigh.map((f) => "FL" + f).join(", ") : ""}${c.cal != 1 ? ` · fuel calibrated ×${c.cal.toFixed(3)}` : ""} · performance: ${tablesInUse(c).length ? "<b>FCOM tables</b> (" + tablesInUse(c).join(", ") + ")" + (tablesFor(c).alt ? `, OPT FL${c.opt} / REC MAX FL${Math.round(c.recmax)} at TOW${tablesFor(c).alt.recmaxT && !c.recOff ? ` (ISA${sgn(c.isaDev)} route average; along the route REC MAX uses the local temperature, ISA${sgn(c.devMin)} to ISA${sgn(c.devMax)})` : ""}${c.recOff ? ` (your FMS value, chart ${c.recOff > 0 ? "+" : "−"}${Math.abs(c.recOff).toFixed(0)} FL)` : ""}` : "") : c.perf == "tables" ? "<b>generic model</b> (no FCOM tables loaded for this aircraft type)" : "generic model"}</p>
+<p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${modelName} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3, "0")}°). Grey rows are the other direction${tooHigh.length ? " · too short for " + tooHigh.map((f) => "FL" + f).join(", ") : ""}${c.cal != 1 ? ` · perf factor ${sgn(c.pfac, 1)}%` : ""} · performance: ${tablesInUse(c).length ? "<b>FCOM tables</b> (" + tablesInUse(c).join(", ") + ")" + (tablesFor(c).alt ? `, OPT FL${c.opt} / REC MAX FL${Math.round(c.recmax)} at TOW${tablesFor(c).alt.recmaxT && !c.recOff ? ` (ISA${sgn(c.isaDev)} route average; along the route REC MAX uses the local temperature, ISA${sgn(c.devMin)} to ISA${sgn(c.devMax)})` : ""}${c.recOff ? ` (your FMS value, chart ${c.recOff > 0 ? "+" : "−"}${Math.abs(c.recOff).toFixed(0)} FL)` : ""}` : "") : c.perf == "tables" ? "<b>generic model</b> (no FCOM tables loaded for this aircraft type)" : "generic model"}</p>
 ${bestAny !== bestF ? `<p class="note" style="font-size:12px">The REC MAX margin keeps you off FL${bestAny.fl} as a constant level: it costs ≈${kg(bestF.fuel - bestAny.fuel)} kg${c.ci ? " (fuel)" : ""}. The step plan below shows when the margin allows a higher level.</p>` : ""}${agree}${age}
 <div class="scroll"><table><tr><th>FL</th><th>WIND</th><th>HAVE</th><th>NEED</th>${c.ci ? "" : "<th>ISA</th>"}<th>GS</th><th>TIME</th><th>TRIP kg</th>${c.ci ? "<th>COST</th>" : ""}<th>Δ</th></tr>
 ${rows}
@@ -2014,7 +2031,7 @@ async function importOFP(file) {
     // Fill the form with what the OFP provides.
     $("route").value = o.route;
     if (o.etd) $("dep").value = o.etd.toISOString().slice(0, 16);
-    if (o.type) $("actype").value = prevType = o.type;
+    if (o.type) { $("actype").value = prevType = o.type; showClimbCorr(); }
     if (o.tow) $("tow").value = (o.tow / 1000).toFixed(1);
     if (o.mach) $("mach").value = o.mach.toFixed(2);
     if (o.ci != null) $("ci").value = o.ci;
@@ -2237,6 +2254,19 @@ document.querySelectorAll(".segb").forEach((b) => { b.onclick = () => setMode(b.
   }
 })();
 
+// Climb fuel correction is kept per aircraft type (optfl.clcorr = { a320neo: -200, ... }).
+function showClimbCorr() {
+  const all = load("optfl.clcorr") || {};
+  $("clcorr").value = all[$("actype").value] || 0;
+}
+$("clcorr").addEventListener("change", () => {
+  const all = load("optfl.clcorr") || {};
+  all[$("actype").value] = parseFloat($("clcorr").value) || 0;
+  store("optfl.clcorr", all);
+  rerender();
+});
+showClimbCorr();
+
 // Changing aircraft type resets fuel flow and TOW to that type's typical values,
 // but only if they still hold the previous type's typical values (so a TOW and
 // fuel flow imported from an OFP or typed in by hand are never overwritten).
@@ -2246,12 +2276,13 @@ $("actype").addEventListener("change", () => {
   if (!P || +$("ff").value === P.ff) $("ff").value = A.ff;
   if (!P || +$("tow").value === P.w) $("tow").value = A.w;
   prevType = $("actype").value;
+  showClimbCorr();
   saveInputs();
   rerender();
 });
 
 // These settings recalculate immediately.
-["model", "perf", "recsrc", "ci", "stepc", "minstep", "recm"].forEach((id) =>
+["model", "perf", "recsrc", "pfac", "ci", "stepc", "minstep", "recm"].forEach((id) =>
   $(id).addEventListener("change", () => { saveInputs(); rerender(); }));
 
 $("ofpfile").addEventListener("change", (e) => {

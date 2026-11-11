@@ -92,6 +92,8 @@ table.log td{vertical-align:top}
 <div class="grid">
 <div><label>Average cruise FF (kg/h)</label><input id="ff" type="number" step="50" value="2400"></div>
 <div><label>Climb table scale (%)</label><input id="clf" type="number" step="5" value="100"></div>
+<div><label>Perf factor / fuel bias (%, FCOM tables)</label><input id="pfac" type="number" step="0.5" value="0"></div>
+<div><label>Climb fuel correction at FL350 (kg, this type)</label><input id="clcorr" type="number" step="50" value="0"></div>
 <div><label>Penalty 2000 ft off OPT (%)</label><input id="p2" type="number" step="0.1" value="2"></div>
 <div><label>Penalty 4000 ft off OPT (%)</label><input id="p4" type="number" step="0.1" value="5"></div>
 <div><label>Step climb cost (kg/1000 ft)</label><input id="stepc" type="number" step="5" value="25"></div>
@@ -123,6 +125,6 @@ table.log td{vertical-align:top}
 <b>Limits.</b> Planning cross-check, not certified performance data, and not an approved EFB application. The FMS, OFP, ATC and REC MAX/buffet margins always govern.
 </div>
 </main>
-<script src="app.js?v=2.11"></script>
+<script src="app.js?v=2.13"></script>
 </body>
 </html>

@@ -79,6 +79,7 @@ table.log td{vertical-align:top}
 <div><label>Cost index</label><input id="ci" type="number" step="1" value="0"></div>
 <div><label>OPT at TOW, no wind</label><input id="opt" type="number" step="10" value="350"></div>
 <div><label>REC MAX at TOW</label><input id="recmax" type="number" step="10" value="370"></div>
+<div><label>REC MAX with FCOM tables</label><select id="recsrc"><option value="chart">From the FCOM chart</option><option value="fms">My FMS value (above)</option></select></div>
 <div><label>Margin below REC MAX (ft)</label><input id="recm" type="number" step="500" value="2000"></div>
 <div><label>Lowest FL to check</label><input id="minfl" type="number" step="10" value="250"></div>
 <div><label>Performance model</label><select id="perf"><option value="generic">Generic</option><option value="tables">FCOM tables</option></select></div>
@@ -122,6 +123,6 @@ table.log td{vertical-align:top}
 <b>Limits.</b> Planning cross-check, not certified performance data, and not an approved EFB application. The FMS, OFP, ATC and REC MAX/buffet margins always govern.
 </div>
 </main>
-<script src="app.js?v=2.9"></script>
+<script src="app.js?v=2.11"></script>
 </body>
 </html>

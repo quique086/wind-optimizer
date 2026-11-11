@@ -49,7 +49,7 @@
  * ========================================================================== */
 
 /** App version, shown in the title and used to force browsers to load new files. */
-const APPV = "2.9";
+const APPV = "2.11";
 
 /** Shows an error message in the status line under the "Get winds" button. */
 function showErr(message) {
@@ -706,7 +706,7 @@ function sim(S, c, path, opt = {}) {
       prevFL = fl;
 
       // Inside the REC MAX margin at this weight?
-      if (fl > recAt(weight, c) - c.recm / 100 + 0.5) over = true;
+      if (fl > recAt(weight, c, s.cum) - c.recm / 100 + 0.5) over = true;
 
       // Wind components, TAS and ground speed.
       const W = interpProf(src(s), fl * 100);
@@ -819,10 +819,32 @@ function optAt(w, c) {
   return T && T.alt ? lerp1(T.alt.weights, T.alt.opt, w / 1000) : flAtWeight(c.opt, w, c);
 }
 
-/** REC MAX (FL) at weight w (kg): from the FCOM table if loaded, otherwise by constant W/delta. */
-function recAt(w, c) {
+/**
+ * REC MAX (FL) at weight w (kg): from the FCOM table if loaded, otherwise by constant W/delta.
+ * With the warm-day lines, `cum` (NM from departure) selects the local forecast temperature.
+ */
+function recAt(w, c, cum) {
   const T = tablesFor(c);
-  return T && T.alt ? lerp1(T.alt.weights, T.alt.recmax, w / 1000) : flAtWeight(c.recmax, w, c);
+  // With "My FMS value", the chart line is shifted (c.recOff) so it passes through
+  // the REC MAX typed in at TOW; the chart then only gives the change with weight.
+  if (!(T && T.alt)) return flAtWeight(c.recmax, w, c);
+  // ISA deviation: the local forecast at distance cum if given, else the route average.
+  const dev = cum != null && c.devAt ? c.devAt(cum) : c.isaDev;
+  return chartRecMax(T.alt, w / 1000, dev) + (c.recOff || 0);
+}
+
+/**
+ * Chart REC MAX (FL) at weight wT (t) for an ISA deviation (°C).
+ * If the table has the warm-day lines (alt.recmaxT: ≤ISA+10, ISA+15, ISA+20),
+ * interpolate between them; colder than +10 uses the ≤ISA+10 line, warmer than
+ * +20 the ISA+20 line. Without them, the single REC MAX line is used.
+ */
+function chartRecMax(alt, wT, isaDev) {
+  const base = lerp1(alt.weights, alt.recmax, wT);
+  const R = alt.recmaxT;
+  if (!R || !isFinite(isaDev)) return base;
+  const lines = R.fl.map((row) => lerp1(alt.weights, row, wT));
+  return lerp1(R.isa, lines, Math.min(Math.max(isaDev, R.isa[0]), R.isa[R.isa.length - 1]));
 }
 
 /**
@@ -857,6 +879,7 @@ function tablesInUse(c) {
  *   "climb":   { "weights": [t], "rows": [{ "fl", "t": [min], "f": [kg], "d": [NM] }] }   from brake release
  *   "cruise":  { "weights": [t], "rows": [{ "fl", "ff": [kg/h, both engines] }] }        at the cruise Mach, ISA
  *   "alt":     { "weights": [t], "opt": [FL], "recmax": [FL] }
+ *              optional "recmaxT": { "isa": [10, 15, 20], "fl": [[FL by weight] per ISA line] }
  *   "descent": { "rows": [{ "fl", "t": min, "f": kg, "d": NM }] }                       to landing
  *              (or with "weights" and arrays, interpolated at the estimated landing weight)
  */
@@ -876,6 +899,12 @@ function parseTables(json) {
       if (!(Array.isArray(a.weights) && Array.isArray(a.opt) && Array.isArray(a.recmax) &&
             a.weights.length >= 2 && a.opt.length == a.weights.length && a.recmax.length == a.weights.length)) {
         throw new Error(t.type + ": alt table incomplete");
+      }
+      // Optional warm-day REC MAX lines: { isa: [10, 15, 20], fl: [[...], [...], [...]] }.
+      const R = a.recmaxT;
+      if (R && !(Array.isArray(R.isa) && Array.isArray(R.fl) && R.isa.length >= 2 && R.fl.length == R.isa.length &&
+                 R.fl.every((row) => Array.isArray(row) && row.length == a.weights.length))) {
+        throw new Error(t.type + ": alt.recmaxT incomplete");
       }
       e.alt = a;
     }
@@ -1099,7 +1128,11 @@ function stepPlan(S, c, base, levels) {
 
   const segCost = (sg, L) => {
     let w = weightAt(sg.a), F = 0, T = 0;
-    if (L > recAt(w, c) - c.recm / 100 + 0.5) return null;   // inside the margin
+    // Inside the margin anywhere in the section (local temperature, weight there)?
+    if (L > recAt(w, c, sg.a) - c.recm / 100 + 0.5) return null;
+    for (const s of S) {
+      if (s.cum > sg.a && s.cum < sg.b && L > recAt(weightAt(s.cum), c, s.cum) - c.recm / 100 + 0.5) return null;
+    }
     for (const s of S) {
       const d = Math.max(0, Math.min(s.a1, sg.b) - Math.max(s.a0, sg.a));
       if (d <= 0) continue;
@@ -1233,7 +1266,7 @@ function vecAvg(S, s0, s1, ft) {
 
 /** Form fields saved on the device and restored at start-up. */
 const IDS = ["actype", "mode", "route", "dep", "tow", "mach", "ci", "opt", "recmax", "recm",
-  "minfl", "model", "perf", "parity", "ff", "clf", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
+  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
 
 /** Saves all form fields. */
 function saveInputs() {
@@ -1265,6 +1298,8 @@ function cfg() {
     magvar: num("magvar") || 0,
     model: $("model").value,                              // AVG / GFS / ECMWF
     perf: $("perf").value,                                // performance model: generic / tables
+    recsrc: $("recsrc").value,                            // REC MAX with tables: "chart" or "fms"
+    recOff: 0,                                            // FL shift of the chart REC MAX (set in render)
     cal: 1,                                               // fuel calibration factor
     mine: $("mine").value.split(/[\s,]+/).map(Number).filter((x) => x >= 100 && x <= 450).slice(0, 4),
   };
@@ -1391,6 +1426,37 @@ function tasRefOf(S, c) {
   return w ? t / w : c.mach * 573.57;
 }
 
+/**
+ * Route-average ISA deviation (°C) at level fl from the forecast,
+ * weighted by distance. Used to pick the warm-day REC MAX line.
+ */
+function isaDevOf(S, fl) {
+  let t = 0, w = 0;
+  for (const s of S) {
+    t += (interpProf(s.prof, fl * 100).T - isaT(fl * 100)) * s.seg;
+    w += s.seg;
+  }
+  return w ? t / w : 0;
+}
+
+/**
+ * Local ISA deviation along the route at level fl, smoothed over ±75 NM
+ * (forecast points are 50–100 NM apart). Sets c.devAt(cum), c.devMin/devMax
+ * and c.coolCum (where it is coldest, i.e. where REC MAX is highest).
+ */
+function setLocalDev(S, c, fl) {
+  const raw = S.map((s) => ({ cum: s.cum, dev: interpProf(s.prof, fl * 100).T - isaT(fl * 100) }));
+  const pts = raw.map((p) => {
+    const near = raw.filter((q) => Math.abs(q.cum - p.cum) <= 75);
+    return { cum: p.cum, dev: near.reduce((a, q) => a + q.dev, 0) / near.length };
+  });
+  const xs = pts.map((p) => p.cum), ys = pts.map((p) => p.dev);
+  c.devAt = (cum) => lerp1(xs, ys, cum);
+  c.devMax = Math.max(...ys);
+  c.devMin = Math.min(...ys);
+  c.coolCum = xs[ys.indexOf(c.devMin)];
+}
+
 /** Computes everything and builds all the result cards. */
 function render(P) {
   // --- Settings and route --------------------------------------------------------
@@ -1402,7 +1468,15 @@ function render(P) {
   const T = tablesFor(c);
   if (T && T.alt) {
     c.opt = Math.round(optAt(c.tow * 1000, c) / 10) * 10;
-    c.recmax = Math.floor(recAt(c.tow * 1000, c) / 10) * 10;
+    // ISA deviation at the cool-day REC MAX level (where REC MAX is decided).
+    const refFL = Math.min(390, lerp1(T.alt.weights, T.alt.recmax, c.tow));
+    c.isaDev = isaDevOf(S, refFL);
+    if (T.alt.recmaxT) setLocalDev(S, c, refFL);
+    if (c.recsrc == "fms" && isFinite(c.recmax)) {
+      c.recOff = c.recmax - recAt(c.tow * 1000, c);         // FMS value minus chart, at TOW
+    } else {
+      c.recmax = Math.floor(recAt(c.tow * 1000, c) / 10) * 10;
+    }
   }
   c.tasRef = tasRefOf(S, c);
 
@@ -1452,7 +1526,7 @@ function render(P) {
   // --- Step plan -----------------------------------------------------------------------
   // Allowed levels go up to REC MAX at landing weight (max FL390).
   const landingWeight = c.tow * 1000 - bestF.fuel;
-  const topFL = Math.min(390, Math.floor(recAt(landingWeight, c) / 10) * 10);
+  const topFL = Math.min(390, Math.floor(recAt(landingWeight, c, c.coolCum) / 10) * 10);
   const dirLv = [];
   for (let f = c.minfl; f <= Math.max(topFL, c.recmax); f += 10) if (isDir(f)) dirLv.push(f);
   const sp = stepPlan(S, c, bestF, dirLv);
@@ -1717,7 +1791,7 @@ ${c.ci ? "" : `<td>${sgn(r.isa)}</td>`}<td>${Math.round(r.cgs)}</td><td>${hm(r.t
   <div><div class="note">Fastest</div><div class="big" style="color:var(--cy)">FL${bestT.fl}</div></div>
   <div><div class="note">vs FL${ref.fl} (no-wind OPT)</div><div class="big" style="color:${save > 0 ? "var(--acc)" : "var(--mut)"}">${save > 0.5 ? "−" + kg(save) + " kg" : "—"}</div><div class="note">${Math.abs(tsave) < 0.5 ? "same time" : (tsave > 0 ? Math.round(tsave) + " min faster" : Math.round(-tsave) + " min slower")}</div></div>
 </div>
-<p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${modelName} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3, "0")}°). Grey rows are the other direction${tooHigh.length ? " · too short for " + tooHigh.map((f) => "FL" + f).join(", ") : ""}${c.cal != 1 ? ` · fuel calibrated ×${c.cal.toFixed(3)}` : ""} · performance: ${tablesInUse(c).length ? "<b>FCOM tables</b> (" + tablesInUse(c).join(", ") + ")" + (tablesFor(c).alt ? `, OPT FL${c.opt} / REC MAX FL${c.recmax} at TOW` : "") : c.perf == "tables" ? "<b>generic model</b> (no FCOM tables loaded for this aircraft type)" : "generic model"}</p>
+<p class="note">Trip ${kg(P.total)} NM · cruise at FL${bestF.fl} ≈${kg(bestF.cdist)} NM · ${modelName} · best from <b>${par}</b> levels (mag track ${String(Math.round(magTrk)).padStart(3, "0")}°). Grey rows are the other direction${tooHigh.length ? " · too short for " + tooHigh.map((f) => "FL" + f).join(", ") : ""}${c.cal != 1 ? ` · fuel calibrated ×${c.cal.toFixed(3)}` : ""} · performance: ${tablesInUse(c).length ? "<b>FCOM tables</b> (" + tablesInUse(c).join(", ") + ")" + (tablesFor(c).alt ? `, OPT FL${c.opt} / REC MAX FL${Math.round(c.recmax)} at TOW${tablesFor(c).alt.recmaxT && !c.recOff ? ` (ISA${sgn(c.isaDev)} route average; along the route REC MAX uses the local temperature, ISA${sgn(c.devMin)} to ISA${sgn(c.devMax)})` : ""}${c.recOff ? ` (your FMS value, chart ${c.recOff > 0 ? "+" : "−"}${Math.abs(c.recOff).toFixed(0)} FL)` : ""}` : "") : c.perf == "tables" ? "<b>generic model</b> (no FCOM tables loaded for this aircraft type)" : "generic model"}</p>
 ${bestAny !== bestF ? `<p class="note" style="font-size:12px">The REC MAX margin keeps you off FL${bestAny.fl} as a constant level: it costs ≈${kg(bestF.fuel - bestAny.fuel)} kg${c.ci ? " (fuel)" : ""}. The step plan below shows when the margin allows a higher level.</p>` : ""}${agree}${age}
 <div class="scroll"><table><tr><th>FL</th><th>WIND</th><th>HAVE</th><th>NEED</th>${c.ci ? "" : "<th>ISA</th>"}<th>GS</th><th>TIME</th><th>TRIP kg</th>${c.ci ? "<th>COST</th>" : ""}<th>Δ</th></tr>
 ${rows}
@@ -1784,7 +1858,7 @@ function profileChart(S, c, rec, recPath, hz, ofpPath, ofpSim) {
   const lvs = cr.map((s) => recPath.at(s.cum)).concat(ofpPath ? cr.map((s) => ofpPath.at(s.cum)) : []);
   const wl = rec.wts.filter((q) => q.cum >= rec.lo && q.cum <= rec.hi);
   const fmin = Math.floor((Math.min(...lvs, ...wl.map((q) => optAt(q.w, c))) - 40) / 20) * 20;
-  const fmax = Math.ceil((Math.max(...wl.map((q) => recAt(q.w, c))) + 10) / 20) * 20;
+  const fmax = Math.ceil((Math.max(...wl.map((q) => recAt(q.w, c, q.cum))) + 10) / 20) * 20;
 
   const x = (d) => L + d / total * (W - L - R);
   const y = (f) => T + (1 - (f - fmin) / (fmax - fmin)) * (H - T - B);
@@ -1812,12 +1886,12 @@ function profileChart(S, c, rec, recPath, hz, ofpPath, ofpSim) {
 
   // A level that depends on the simulated weight (REC MAX, OPT).
   const weightLine = (fn, color, dash) => {
-    const d = wl.map((q, i) => (i ? "L" : "M") + x(q.cum).toFixed(1) + "," + y(fn(q.w)).toFixed(1)).join("");
+    const d = wl.map((q, i) => (i ? "L" : "M") + x(q.cum).toFixed(1) + "," + y(fn(q.w, q.cum)).toFixed(1)).join("");
     return `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.3" ${dash ? `stroke-dasharray="${dash}"` : ""}/>`;
   };
 
-  plot += weightLine((w) => recAt(w, c), "#f85149", "");
-  plot += weightLine((w) => recAt(w, c) - c.recm / 100, "#f85149", "4 3");
+  plot += weightLine((w, cum) => recAt(w, c, cum), "#f85149", "");
+  plot += weightLine((w, cum) => recAt(w, c, cum) - c.recm / 100, "#f85149", "4 3");
   plot += weightLine((w) => optAt(w, c), "#d2a8ff", "2 3");
   if (ofpPath && ofpSim && !ofpSim.bad) plot += profileLine(ofpSim, ofpPath, "#8b949e", "6 4", 1.5);
   plot += profileLine(rec, recPath, "#39c5cf", "", 3);
@@ -1911,7 +1985,7 @@ function hazards(S, c, path, lo, hi, wts) {
     if (jet >= 110) why.push("jet " + Math.round(jet) + " kt");
     if (spd) why.push("wind change " + Math.round(Math.abs(dWa)) + " kt/50 NM");
 
-    const room = (recAt(weightAt(s.cum), c) - fl) * 100;
+    const room = (recAt(weightAt(s.cum), c, s.cum) - fl) * 100;
     out.push({
       s, fl, W, vws, hws, dT, dWa, jet, lv, spd, mmoKt, why, room,
       marg: Math.min(4000, RMARG[lv] + (spd ? 1000 : 0)),
@@ -1940,7 +2014,7 @@ async function importOFP(file) {
     // Fill the form with what the OFP provides.
     $("route").value = o.route;
     if (o.etd) $("dep").value = o.etd.toISOString().slice(0, 16);
-    if (o.type) $("actype").value = o.type;
+    if (o.type) $("actype").value = prevType = o.type;
     if (o.tow) $("tow").value = (o.tow / 1000).toFixed(1);
     if (o.mach) $("mach").value = o.mach.toFixed(2);
     if (o.ci != null) $("ci").value = o.ci;
@@ -2163,17 +2237,21 @@ document.querySelectorAll(".segb").forEach((b) => { b.onclick = () => setMode(b.
   }
 })();
 
-// Changing aircraft type resets fuel flow and TOW to that type's typical values.
+// Changing aircraft type resets fuel flow and TOW to that type's typical values,
+// but only if they still hold the previous type's typical values (so a TOW and
+// fuel flow imported from an OFP or typed in by hand are never overwritten).
+let prevType = $("actype").value;
 $("actype").addEventListener("change", () => {
-  const A = AC[$("actype").value];
-  $("ff").value = A.ff;
-  $("tow").value = A.w;
+  const P = AC[prevType], A = AC[$("actype").value];
+  if (!P || +$("ff").value === P.ff) $("ff").value = A.ff;
+  if (!P || +$("tow").value === P.w) $("tow").value = A.w;
+  prevType = $("actype").value;
   saveInputs();
   rerender();
 });
 
 // These settings recalculate immediately.
-["model", "perf", "ci", "stepc", "minstep", "recm"].forEach((id) =>
+["model", "perf", "recsrc", "ci", "stepc", "minstep", "recm"].forEach((id) =>
   $(id).addEventListener("change", () => { saveInputs(); rerender(); }));
 
 $("ofpfile").addEventListener("change", (e) => {

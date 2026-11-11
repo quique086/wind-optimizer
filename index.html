@@ -81,6 +81,7 @@ table.log td{vertical-align:top}
 <div><label>REC MAX at TOW</label><input id="recmax" type="number" step="10" value="370"></div>
 <div><label>Margin below REC MAX (ft)</label><input id="recm" type="number" step="500" value="2000"></div>
 <div><label>Lowest FL to check</label><input id="minfl" type="number" step="10" value="250"></div>
+<div><label>Performance model</label><select id="perf"><option value="generic">Generic</option><option value="tables">FCOM tables</option></select></div>
 <div><label>Wind model</label><select id="model"><option value="AVG">Average GFS+ECMWF</option><option value="GFS">GFS (NOAA)</option><option value="ECMWF">ECMWF</option></select></div>
 <div style="grid-column:1/-1"><label id="mineLbl">Levels you normally enter (to compare)</label><input id="mine" value="320 340 360 380"></div>
 <div><label>Mag var (° E+, W−)</label><input id="magvar" type="number" step="1" value="0"></div>
@@ -95,6 +96,10 @@ table.log td{vertical-align:top}
 <div><label>Step climb cost (kg/1000 ft)</label><input id="stepc" type="number" step="5" value="25"></div>
 <div><label>Min. saving for a step (kg)</label><input id="minstep" type="number" step="10" value="40"></div>
 </div>
+<label style="margin-top:10px">Performance tables (FCOM)</label>
+<label class="file">Load tables file (.json)<input id="tblfile" type="file" accept=".json,application/json"></label>
+<div id="tblmsg" class="note"></div>
+<button class="sec" id="tblclear">Remove tables</button>
 <div class="note">"OPT at TOW, no wind" and "REC MAX at TOW": read them on the FMS (PROG) with the takeoff weight in INIT B and before entering any winds. OPT and REC MAX then rise as fuel burns, at constant weight/pressure ratio.</div>
 </details>
 <div class="row"><button id="go">Get winds &amp; calculate</button><button class="sec" id="reuse">Recalculate</button></div>
@@ -117,6 +122,6 @@ table.log td{vertical-align:top}
 <b>Limits.</b> Planning cross-check, not certified performance data, and not an approved EFB application. The FMS, OFP, ATC and REC MAX/buffet margins always govern.
 </div>
 </main>
-<script src="app.js?v=2.5"></script>
+<script src="app.js?v=2.9"></script>
 </body>
 </html>

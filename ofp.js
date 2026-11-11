@@ -1,4 +1,19 @@
-/* OFP reader: PDF -> text lines (pdf.js) -> flight data. Shared by the app and the tests. */
+/*
+ * ============================================================================
+ *  OFP READER
+ * ============================================================================
+ *  Turns an OFP PDF into flight data for the app:
+ *    pdfLines()  PDF -> text lines, using pdf.js (pieces of text on the same
+ *                height of the page are joined into one line)
+ *    parseOFP()  text lines -> { route, ETD, aircraft type, CI, Mach, FF, TOW,
+ *                trip fuel/time, off-OPT penalties, planned levels, planned
+ *                time and fuel at each fix, wind shear rate at each fix }
+ *
+ *  Written for the OFP layout of JAT804 (Lido-style navigation log: each fix
+ *  takes 3 lines; latitude on line 1, longitude on line 2, Mach on line 3).
+ * ============================================================================
+ */
+/** Reads every page of the PDF and returns its text as lines, top to bottom. */
 export async function pdfLines(pdfjs, data){
   const doc = await pdfjs.getDocument({data, isEvalSupported:false}).promise;
   const lines = [];
@@ -22,7 +37,9 @@ export async function pdfLines(pdfjs, data){
   return lines;
 }
 
+/** Pseudo-points of the navigation log that are not real fixes. */
 const SKIP = new Set(["T_O_C","T_O_D","B_O_D","TOC","TOD"]);
+/** Extracts the flight data from the OFP text lines (see header). */
 export function parseOFP(lines){
   const txt = lines.join("\n");
   const o = {waypoints:[], levels:[]};

@@ -49,7 +49,7 @@
  * ========================================================================== */
 
 /** App version, shown in the title and used to force browsers to load new files. */
-const APPV = "2.17";
+const APPV = "2.20";
 
 /** Shows an error message in the status line under the "Get winds" button. */
 function showErr(message) {
@@ -579,9 +579,9 @@ function climbRaw(fl, c) {
   if (T && T.climb) {
     // FCOM table: by level and takeoff weight; "Climb table scale" still applies.
     return {
-      d: lookup2(T.climb, "d", fl, c.tow) * scale,
-      t: lookup2(T.climb, "t", fl, c.tow) * scale / 60,
-      f: lookup2(T.climb, "f", fl, c.tow) * scale,
+      d: lookupT(T.climb, "d", fl, c.tow, c.clIsa, true) * scale,
+      t: lookupT(T.climb, "t", fl, c.tow, c.clIsa, true) * scale / 60,
+      f: lookupT(T.climb, "f", fl, c.tow, c.clIsa, true) * scale,
     };
   }
   const A = acOf(c);
@@ -621,10 +621,13 @@ function descOf(fl, c) {
     // at idle, so distance, time and fuel scale together; the approach doesn't.
     // The table may carry its own calibrated factor (descent.distFactor) for the type.
     const k = (c.desf || 1) * (T.descent.distFactor || 1);
+    // FCOM correction per °C above ISA (descent.tempCorr = { t, f, d } fractions per °C).
+    const tc = T.descent.tempCorr || {}, dev = Math.max(0, c.desIsa || 0);
+    const kt = (x) => 1 + (tc[x] || 0) * dev;
     return {
-      d: part("d") * k + (ap.d || 0),
-      t: (part("t") * k + (ap.t || 0)) / 60,
-      f: part("f") * k + (ap.f || 0),
+      d: part("d") * k * kt("d") + (ap.d || 0),
+      t: (part("t") * k * kt("t") + (ap.t || 0)) / 60,
+      f: part("f") * k * kt("f") + (ap.f || 0),
     };
   }
   // Generic: the descent ends at the airport, so count only the height above it.
@@ -813,7 +816,35 @@ let TABLES = load("optfl.tables") || {};
  */
 function tablesFor(c) {
   if (c.perf !== "tables") return null;
-  return TABLES[c.ac] || null;
+  const T = TABLES[c.ac];
+  if (!T) return null;
+  if (!T.variants) return T;                       // older file: one table per type
+  // Several FCOM variants for the type: pick the one whose MSN range has c.msn.
+  const v = c.msn && T.variants.find((x) => x.msn && c.msn >= x.msn[0] && c.msn <= x.msn[1]);
+  return v || T.variants[0];
+}
+
+/** Linear interpolation that extrapolates past the ends (used across ISA deviations). */
+function lerpX(xs, ys, x) {
+  const n = xs.length;
+  if (n == 1) return ys[0];
+  const i = x <= xs[0] ? 0 : x >= xs[n - 1] ? n - 2 : xs.findIndex((v, k) => x >= v && x <= xs[k + 1]);
+  return ys[i] + (ys[i + 1] - ys[i]) * (x - xs[i]) / (xs[i + 1] - xs[i]);
+}
+
+/**
+ * Lookup in a table that may come in several temperatures:
+ *   { weights, rows }                         one temperature
+ *   { weights, sets: [{ isa, rows }, ...] }   e.g. ISA+10 and ISA+20
+ * Interpolates in weight and FL inside each set, then in ISA deviation.
+ * clamp = true holds the value at the coldest/warmest set instead of extrapolating.
+ */
+function lookupT(tbl, key, fl, weightT, isa, clamp) {
+  if (!tbl.sets) return lookup2(tbl, key, fl, weightT);
+  const xs = tbl.sets.map((st) => st.isa);
+  const ys = tbl.sets.map((st) => lookup2({ weights: tbl.weights, rows: st.rows }, key, fl, weightT));
+  const d = isFinite(isa) ? isa : xs[0];
+  return clamp ? lerp1(xs, ys, d) : lerpX(xs, ys, Math.max(-15, Math.min(30, d)));
 }
 
 /** Straight-line interpolation of ys over xs (sorted ascending), clamped at the ends. */
@@ -882,6 +913,14 @@ function chartRecMax(alt, wT, isaDev) {
  */
 function pieceFuel(c, fl, weight, tas, hours, cal, pen, tasRef, midWeight) {
   const T = tablesFor(c);
+  if (T && T.cruise && T.cruise.sets) {
+    // Tables at several temperatures: fuel flow at the local ISA deviation (recovered
+    // from the TAS), then scaled for your Mach against the table's Mach.
+    const Tk = Math.pow(tas / (c.mach * SOUND_K), 2);
+    const isa = Tk - 273.15 - isaT(fl * 100);
+    const ff = lookupT(T.cruise, "ff", fl, weight / 1000, isa, false);
+    return ff * cal * (c.mach / (T.cruise.mach || c.mach)) * hours;
+  }
   if (T && T.cruise) {
     const ff = lookup2(T.cruise, "ff", fl, weight / 1000);
     // The table is for its own Mach (M.78) in ISA. Fuel flow scales with the actual
@@ -915,11 +954,15 @@ function tablesInUse(c) {
 function parseTables(json) {
   const list = Array.isArray(json.tables) ? json.tables : [json];
   const out = {};
-  const okRows = (t, keys) => t && Array.isArray(t.rows) && t.rows.length >= 2 &&
+  const okRows1 = (t, keys) => t && Array.isArray(t.rows) && t.rows.length >= 2 &&
     t.rows.every((r) => isFinite(r.fl) && keys.every((k) => r[k] != null));
+  // A table is either one set of rows or several temperature sets of rows.
+  const okRows = (t, keys) => t && (t.sets
+    ? Array.isArray(t.sets) && t.sets.length >= 1 && t.sets.every((st) => isFinite(st.isa) && okRows1(st, keys))
+    : okRows1(t, keys));
   for (const t of list) {
     if (!t || !AC[t.type]) throw new Error("Unknown aircraft type: " + (t && t.type) + " (use a320ceo, a320neo, a321ceo or a321neo)");
-    const e = { name: t.name || t.type };
+    const e = { name: t.name || t.type, msn: Array.isArray(t.msn) ? t.msn : null };
     if (t.climb) { if (!okRows(t.climb, ["t", "f", "d"])) throw new Error(t.type + ": climb table incomplete"); e.climb = t.climb; }
     if (t.cruise) { if (!okRows(t.cruise, ["ff"])) throw new Error(t.type + ": cruise table incomplete"); e.cruise = t.cruise; }
     if (t.descent) { if (!okRows(t.descent, ["t", "f", "d"])) throw new Error(t.type + ": descent table incomplete"); e.descent = t.descent; }
@@ -937,7 +980,8 @@ function parseTables(json) {
       }
       e.alt = a;
     }
-    out[t.type] = e;
+    // Several entries for one type = FCOM variants by MSN.
+    (out[t.type] = out[t.type] || { variants: [] }).variants.push(e);
   }
   return out;
 }
@@ -1294,8 +1338,8 @@ function vecAvg(S, s0, s1, ft) {
  * ========================================================================== */
 
 /** Form fields saved on the device and restored at start-up. */
-const IDS = ["actype", "mode", "route", "dep", "tow", "mach", "ci", "opt", "recmax", "recm",
-  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "pfac", "delev", "desf", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
+const IDS = ["actype", "mode", "route", "dep", "tow", "mach", "ci", "goal", "opt", "recmax", "recm",
+  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "pfac", "msn", "delev", "desf", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
 
 /** Saves all form fields. */
 function saveInputs() {
@@ -1311,7 +1355,10 @@ function cfg() {
   return {
     ac,                                                   // aircraft type key
     mach: num("mach") || 0.78,
-    ci: num("ci") || 0,                                   // cost index (kg/min)
+    // Objective: "fuel" ignores the cost index (minimum trip fuel); "cost" uses
+    // cost = fuel + CI × minutes, like the FMS ECON.
+    goal: $("goal").value,
+    ci: $("goal").value == "cost" ? num("ci") || 0 : 0,  // cost index (kg/min); 0 = minimum fuel
     tow: num("tow") || AC[ac].w,                          // takeoff weight (t)
     opt: num("opt"),                                      // no-wind OPT at TOW (FL)
     recmax: num("recmax"),                                // REC MAX at TOW (FL)
@@ -1321,6 +1368,7 @@ function cfg() {
     clcorr: num("clcorr") || 0,                           // climb fuel correction at FL350 (kg, this type)
     delev: num("delev") || 0,                             // destination elevation (ft)
     pfac: num("pfac") || 0,
+    msn: num("msn") || 0,                                 // aircraft MSN: picks the FCOM variant
     desf: (num("desf") || 100) / 100,                     // descent distance vs FCOM (1 = table)                               // perf factor / fuel bias (%), FCOM tables only
     p2: num("p2"), p4: num("p4"),                         // off-OPT penalties (%)
     recm: isFinite(num("recm")) ? Math.max(0, num("recm")) : 2000,   // margin below REC MAX (ft)
@@ -1512,6 +1560,10 @@ function render(P) {
     }
   }
   c.tasRef = tasRefOf(S, c);
+  // Temperatures for the climb and descent tables: ISA deviation at FL200 over the
+  // first and last 150 NM of the route.
+  c.clIsa = isaDevOf(S.filter((s) => s.cum <= 150), 200);
+  c.desIsa = isaDevOf(S.filter((s) => s.cum >= c.total - 150), 200);
   // FCOM tables are book values for a new aircraft: apply the aircraft's
   // perf factor (FMS PERF FACTOR, or a fuel bias) to all fuel. The generic
   // model doesn't need it: its fuel flow comes from the OFP, already biased.
@@ -1591,7 +1643,7 @@ function render(P) {
     hzHtml = `<div class="card err">Profile/hazards could not be drawn: ${e.message}</div>`;
   }
 
-  const cmpHtml = ofpCompareHtml(c, OFd, ofpS, recSim, recPath, S);
+  const cmpHtml = ofpCompareHtml(c, OFd, ofpS, recSim, recPath, S, ofpP);
   const cdHtml = climbDescentHtml(S, c, bestF, recSim, recPath);
   const levelsCard = levelsCardHtml(c, pick, cruise, band, bestF, bestT, shown, key, mineHtml);
   const resultHtml = resultCardHtml(P, c, res, ref, bestF, bestT, bestAny, key, isDir, par, magTrk, tooHigh, agree, age);
@@ -1721,13 +1773,27 @@ ${worstTxt}</p>
 }
 
 /** OFP profile vs optimizer profile, both through the same model and winds. */
-function ofpCompareHtml(c, OFd, ofpS, recSim, recPath, S) {
+function ofpCompareHtml(c, OFd, ofpS, recSim, recPath, S, ofpP) {
   if (!(ofpS && !ofpS.bad && !recSim.bad)) return "";
   const dF = ofpS.fuel - recSim.fuel;            // positive = optimizer saves fuel
   const dT = (ofpS.time - recSim.time) * 60;     // positive = optimizer is faster (min)
   const dC = ofpS.cost - recSim.cost;
   const tripTime = OFd.tripTime ? (+OFd.tripTime.slice(0, 2) + +OFd.tripTime.slice(2) / 60) : null;
   const bias = OFd.trip ? ofpS.fuel / OFd.trip - 1 : null;
+
+  // Closest the OFP profile gets to REC MAX in cruise (ft) and where. The optimizer
+  // must stay outside the REC MAX margin; the OFP is not held to it.
+  let room = Infinity, roomAt = "";
+  if (ofpP) {
+    ofpS.wts.forEach((q) => {
+      if (q.cum <= ofpS.lo || q.cum >= ofpS.hi) return;
+      const r = (recAt(q.w, c, q.cum) - ofpP.at(q.cum)) * 100;
+      if (r < room) { room = r; roomAt = (S.filter((s) => s.user && s.name && s.cum <= q.cum).pop() || {}).name || ""; }
+    });
+  }
+  const marginNote = room < c.recm
+    ? `<p style="font-size:13px;color:var(--am)">The OFP profile ${room <= 0 ? `goes <b>${Math.ceil(-room / 100) * 100} ft above REC MAX</b>` : `comes within <b>${Math.floor(room / 100) * 100} ft of REC MAX</b>`}${roomAt ? ` (after ${roomAt})` : ""}, inside your ${c.recm} ft margin. The optimizer isn't allowed that close, so part of any difference is the price of your margin. ${room > 0 ? `Set the margin to ${Math.floor(room / 100) * 100} ft to compare on equal terms.` : "The app's REC MAX for that weight and temperature is below the OFP level there."}</p>`
+    : "";
 
   const row = (name, levelsText, r) => `<tr><td>${name}</td><td style="text-align:left;white-space:normal">${levelsText}</td><td>${kg(r.fuel)}</td><td>${hm(r.time)}</td>${c.ci ? `<td>${kg(r.cost)}</td>` : ""}</tr>`;
   const big = (label, good, text) => `<div><div class="note">${label}</div><div class="big" style="color:${good ? "var(--acc)" : "var(--rd)"}">${text}</div></div>`;
@@ -1747,7 +1813,7 @@ function ofpCompareHtml(c, OFd, ofpS, recSim, recPath, S) {
   ${big("Time", dT >= 0, Math.abs(dT) < 0.5 ? "same" : (dT > 0 ? "−" : "+") + Math.round(Math.abs(dT)) + " min")}
   ${c.ci ? big("Cost (CI " + c.ci + ")", dC >= 0, (dC >= 0 ? "−" : "+") + kg(Math.abs(dC))) : ""}
 </div>
-<p style="font-size:13px">${sentence}</p>
+<p style="font-size:13px">${sentence}</p>${marginNote}
 <div class="scroll"><table><tr><th>PROFILE</th><th style="text-align:left">LEVELS</th><th>TRIP kg</th><th>TIME</th>${c.ci ? "<th>COST</th>" : ""}</tr>
 ${row("OFP", OFd.levelsTxt || "", ofpS)}${row("Optimizer", profTxt(recPath, recSim, S), recSim)}</table></div>
 <p class="note">Both profiles are flown through the same model and the same forecast winds, so the difference is like for like.${OFd.trip ? ` For reference, the OFP's own figures are ${kg(OFd.trip)} kg${tripTime ? " and " + hm(tripTime) : ""}; the tool estimates the OFP profile at ${kg(ofpS.fuel)} kg (${sgn(bias * 100, 1)}%), so read absolute kg with that offset.` : ""}</p></div>`;
@@ -2370,7 +2436,7 @@ $("actype").addEventListener("change", () => {
 });
 
 // These settings recalculate immediately.
-["model", "perf", "recsrc", "pfac", "delev", "desf", "ci", "stepc", "minstep", "recm"].forEach((id) =>
+["model", "perf", "recsrc", "pfac", "msn", "delev", "desf", "ci", "goal", "stepc", "minstep", "recm"].forEach((id) =>
   $(id).addEventListener("change", () => { saveInputs(); rerender(); }));
 
 $("ofpfile").addEventListener("change", (e) => {
@@ -2383,7 +2449,12 @@ $("ofpfile").addEventListener("change", (e) => {
 function showTables() {
   const types = Object.keys(TABLES);
   $("tblmsg").innerHTML = types.length
-    ? "Loaded on this device: " + types.map((t) => `<b>${t.toUpperCase()}</b> (${["climb", "cruise", "alt", "descent"].filter((k) => TABLES[t][k]).join(", ")})`).join(" · ")
+    ? "Loaded on this device: " + types.map((t) => {
+      const V = TABLES[t].variants || [TABLES[t]];
+      const parts = ["climb", "cruise", "alt", "descent"].filter((k) => V[0][k]).join(", ");
+      const msn = V.filter((x) => x.msn).map((x) => `MSN ${x.msn[0]}–${x.msn[1]}`).join(" / ");
+      return `<b>${t.toUpperCase()}</b> (${parts}${msn ? "; " + msn : ""})`;
+    }).join(" · ")
     : "None loaded: the generic model is used.";
   $("tblclear").style.display = types.length ? "" : "none";
 }

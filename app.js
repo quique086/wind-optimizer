@@ -49,7 +49,7 @@
  * ========================================================================== */
 
 /** App version, shown in the title and used to force browsers to load new files. */
-const APPV = "2.13";
+const APPV = "2.17";
 
 /** Shows an error message in the status line under the "Get winds" button. */
 function showErr(message) {
@@ -610,18 +610,31 @@ function descOf(fl, c) {
   if (T && T.descent) {
     // FCOM table: by level (and landing weight if the table has weight columns).
     const landingT = c.tow - c.ff * (c.total || 0) / 450 / 1000;
+    // The table goes from fl down to 1500 ft (above a sea-level airport). At a high
+    // airport the descent ends at elevation + 1500 ft, so the part of the table
+    // below that is taken off: value(fl) − [value(elev + 1500 ft) − value(1500 ft)].
+    const endFL = Math.min(fl, 15 + Math.max(0, c.delev || 0) / 100);
+    const part = (k) => lookup2(T.descent, k, fl, landingT) - (lookup2(T.descent, k, endFL, landingT) - lookup2(T.descent, k, 15, landingT));
+    // Approach and landing from 1500 ft above the airport, if the table gives it.
+    const ap = T.descent.approach || { t: 0, f: 0, d: 0 };
+    // Descent distance setting: a slower (low-CI) descent is longer and takes longer
+    // at idle, so distance, time and fuel scale together; the approach doesn't.
+    // The table may carry its own calibrated factor (descent.distFactor) for the type.
+    const k = (c.desf || 1) * (T.descent.distFactor || 1);
     return {
-      d: lookup2(T.descent, "d", fl, landingT),
-      t: lookup2(T.descent, "t", fl, landingT) / 60,
-      f: lookup2(T.descent, "f", fl, landingT),
+      d: part("d") * k + (ap.d || 0),
+      t: (part("t") * k + (ap.t || 0)) / 60,
+      f: part("f") * k + (ap.f || 0),
     };
   }
-  const k = fl / 10;
+  // Generic: the descent ends at the airport, so count only the height above it.
+  const k = Math.max(0, fl - Math.max(0, c.delev || 0) / 100) / 10;
   const A = acOf(c);
+  const kd = c.desf || 1;
   return {
-    d: (3.2 * k + 10) * A.dd,
-    t: (0.45 * k + 6) * A.dd / 60,
-    f: (150 + 5 * k) * A.df,
+    d: (3.2 * k * kd + 10) * A.dd,
+    t: (0.45 * k * kd + 6) * A.dd / 60,
+    f: (150 + 5 * k) * A.df * kd,
   };
 }
 
@@ -745,20 +758,23 @@ function sim(S, c, path, opt = {}) {
     // Fuel burnt and time elapsed at each named route point.
     if (s.user && s.name) {
       if (s.cum < lo) {
-        // In the climb: fuel front-loaded (takeoff burns most), time slightly front-loaded.
-        const q = Math.max(0, s.cum) / lo;
-        chk[s.name] = climb.f * cal * Math.sqrt(q);
-        tchk[s.name] = climb.t * Math.pow(q, 0.75);
+        // In the climb: find the level reached at this distance from the climb
+        // table itself, and take that level's climb fuel and time.
+        const p = phaseAt((fl) => climbPart(fl, c), Math.max(0, s.cum) * climb.d / lo, L0);
+        chk[s.name] = p.f * cal;
+        tchk[s.name] = p.t;
       } else if (s.cum <= hi) {
         // In cruise: climb + cruise so far, including the part of this piece before the fix.
         const frac = d > 0 ? Math.min(1, Math.max(0, (Math.min(s.cum, hi) - Math.max(s.a0, lo)) / d)) : 0;
         chk[s.name] = climb.f * cal + fuelBefore + (fuel - fuelBefore) * frac;
         tchk[s.name] = climb.t + timeBefore + (time - timeBefore) * frac;
       } else {
-        // In the descent: proportional to the distance flown in it.
-        const q = (s.cum - hi) / Math.max(1, c.total - hi);
-        chk[s.name] = climb.f * cal + fuel + desc.f * cal * q;
-        tchk[s.name] = climb.t + time + desc.t * q;
+        // In the descent: the level still to descend from at this distance to go
+        // (from the descent table); the fuel and time used so far are the rest.
+        const toGo = (c.total - s.cum) * desc.d / Math.max(1, c.total - hi);
+        const p = phaseAt((fl) => descOf(fl, c), toGo, Lend);
+        chk[s.name] = climb.f * cal + fuel + (desc.f - p.f) * cal;
+        tchk[s.name] = climb.t + time + (desc.t - p.t);
       }
     }
   }
@@ -868,7 +884,9 @@ function pieceFuel(c, fl, weight, tas, hours, cal, pen, tasRef, midWeight) {
   const T = tablesFor(c);
   if (T && T.cruise) {
     const ff = lookup2(T.cruise, "ff", fl, weight / 1000);
-    const tasIsa = c.mach * SOUND_K * Math.sqrt(isaT(fl * 100) + 273.15);
+    // The table is for its own Mach (M.78) in ISA. Fuel flow scales with the actual
+    // TAS (your Mach, real temperature) over the table's TAS (table Mach, ISA).
+    const tasIsa = (T.cruise.mach || c.mach) * SOUND_K * Math.sqrt(isaT(fl * 100) + 273.15);
     return ff * cal * (tas / tasIsa) * hours;
   }
   const ff = c.ff * cal * (weight / midWeight);
@@ -1277,7 +1295,7 @@ function vecAvg(S, s0, s1, ft) {
 
 /** Form fields saved on the device and restored at start-up. */
 const IDS = ["actype", "mode", "route", "dep", "tow", "mach", "ci", "opt", "recmax", "recm",
-  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "pfac", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
+  "minfl", "model", "perf", "recsrc", "parity", "ff", "clf", "pfac", "delev", "desf", "magvar", "p2", "p4", "stepc", "minstep", "mine"];
 
 /** Saves all form fields. */
 function saveInputs() {
@@ -1301,7 +1319,9 @@ function cfg() {
     ff: num("ff"),                                        // average cruise FF (kg/h)
     clf: num("clf") || 100,                               // climb table scale (%)
     clcorr: num("clcorr") || 0,                           // climb fuel correction at FL350 (kg, this type)
-    pfac: num("pfac") || 0,                               // perf factor / fuel bias (%), FCOM tables only
+    delev: num("delev") || 0,                             // destination elevation (ft)
+    pfac: num("pfac") || 0,
+    desf: (num("desf") || 100) / 100,                     // descent distance vs FCOM (1 = table)                               // perf factor / fuel bias (%), FCOM tables only
     p2: num("p2"), p4: num("p4"),                         // off-OPT penalties (%)
     recm: isFinite(num("recm")) ? Math.max(0, num("recm")) : 2000,   // margin below REC MAX (ft)
     stepc: isFinite(num("stepc")) ? num("stepc") : 25,               // step climb cost (kg/1000 ft)
@@ -1572,7 +1592,7 @@ function render(P) {
   }
 
   const cmpHtml = ofpCompareHtml(c, OFd, ofpS, recSim, recPath, S);
-  const cdHtml = climbDescentHtml(S, c, bestF);
+  const cdHtml = climbDescentHtml(S, c, bestF, recSim, recPath);
   const levelsCard = levelsCardHtml(c, pick, cruise, band, bestF, bestT, shown, key, mineHtml);
   const resultHtml = resultCardHtml(P, c, res, ref, bestF, bestT, bestAny, key, isDir, par, magTrk, tooHigh, agree, age);
 
@@ -1734,7 +1754,8 @@ ${row("OFP", OFd.levelsTxt || "", ofpS)}${row("Optimizer", profTxt(recPath, recS
 }
 
 /** Climb and descent winds for the FMS CLB/DES WIND pages. */
-function climbDescentHtml(S, c, bestF) {
+function climbDescentHtml(S, c, bestF, recSim, recPath) {
+  const td = tdInfo(S, c, recSim, recPath);
   const levels = [50, 100, 180, 250, bestF.fl];
   const climbEnd = bestF.cl.d + bestF.wc * bestF.cl.t;            // NM from departure
   const descStart = c.total - (bestF.de.d + bestF.wd * bestF.de.t);
@@ -1747,7 +1768,68 @@ function climbDescentHtml(S, c, bestF) {
 <tr><th></th>${levels.map((f) => `<th>FL${String(f).padStart(3, "0")}</th>`).join("")}</tr>
 <tr><td>CLB</td>${cells(0, Math.max(climbEnd, 60))}</tr>
 <tr><td>DES</td>${cells(Math.min(descStart, c.total - 60), c.total)}</tr></table></div>
-<p class="note">For the FMS CLB/DES WIND pages, averaged over the climb (first ${Math.round(climbEnd)} NM) and descent (last ${Math.round(c.total - descStart)} NM). Average climb wind ${sgn(bestF.wc)} kt, descent ${sgn(bestF.wd)} kt along track, already included in the trip figures.</p></div>`;
+<p class="note">For the FMS CLB/DES WIND pages, averaged over the climb (first ${Math.round(climbEnd)} NM) and descent (last ${Math.round(c.total - descStart)} NM). Average climb wind ${sgn(bestF.wc)} kt, descent ${sgn(bestF.wd)} kt along track, already included in the trip figures.</p>
+${td ? `<h2 style="margin-top:12px">Estimated top of descent</h2>
+<p style="font-size:15px"><b>${Math.round(td.toGo)} NM</b> to touchdown · ${tdWhere(td)}</p>
+<p class="note">From FL${td.fl} on the recommended profile, to ${Math.max(0, c.delev || 0)} ft + 1500 ft${c.delev ? "" : " (destination elevation 0: set it in More settings, or load the OFP)"}, then the approach. Still air ${Math.round(td.desc.d)} NM, ${Math.round(td.desc.t * 60)} min, ${kg(td.desc.f * c.cal)} kg; descent wind ${sgn(td.wind)} kt along track. 3-to-1 check: ${Math.round(td.rule3)} NM (plus about 10 NM to slow down). The flight log shows the T/D time and fuel. ATC, the STAR and speed restrictions move the real T/D: use the FMS T/D for the descent.</p>` : ""}</div>`;
+}
+
+/**
+ * Climb from brake release to fl, with the part below FL50 (where the tables
+ * start) taken as a straight line from the runway.
+ */
+function climbPart(fl, c) {
+  if (fl >= 50) return climbOf(fl, c);
+  const r = climbOf(50, c), q = Math.max(0, fl) / 50;
+  return { d: r.d * q, t: r.t * q, f: r.f * q };
+}
+
+/**
+ * Inverse of a climb/descent function: the level whose distance is `dist`
+ * (bisection between 0 and maxFL). Returns that level's { d, t, f }.
+ */
+function phaseAt(fn, dist, maxFL) {
+  let a = 0, b = maxFL;
+  // Shorter than the bottom of the table (e.g. the last miles of the approach): pro rata.
+  const z = fn(0);
+  if (dist <= z.d) return { d: dist, t: z.d ? z.t * dist / z.d : 0, f: z.d ? z.f * dist / z.d : 0 };
+  if (dist >= fn(b).d) return fn(b);
+  for (let i = 0; i < 25; i++) {
+    const m = (a + b) / 2;
+    if (fn(m).d < dist) a = m; else b = m;
+  }
+  return fn((a + b) / 2);
+}
+
+/**
+ * Estimated top of descent for a simulated profile r (from sim) flown on path:
+ *   toGo   ground distance from T/D to the destination (descent table to
+ *          elevation + 1500 ft, the approach, and the forecast descent wind)
+ *   cum    NM from departure; prev/next = route fixes around it
+ *   t, f   time (h) and fuel burnt (kg) from takeoff to T/D
+ *   rule3  the 3-NM-per-1000-ft check from the cruise level down to the airport
+ */
+function tdInfo(S, c, r, path) {
+  if (!r || r.bad) return null;
+  const fl = path.at(Math.max(0, r.hi - 1));
+  const fixes = S.filter((s) => s.user && s.name && !s.apt);
+  const prev = fixes.filter((s) => s.cum <= r.hi).pop();
+  const next = fixes.find((s) => s.cum > r.hi);
+  return {
+    fl, cum: r.hi, toGo: c.total - r.hi,
+    prev: prev ? { name: prev.name, nm: r.hi - prev.cum } : null,
+    next: next ? { name: next.name, nm: next.cum - r.hi } : null,
+    t: r.time - r.de.t, f: r.fuel - r.de.f * c.cal,
+    wind: r.wd, desc: r.de,
+    rule3: 3 * (fl * 100 - Math.max(0, c.delev || 0)) / 1000,
+  };
+}
+
+/** Text for the T/D position: "38 NM after MER (12 NM before ANKAS)". */
+function tdWhere(td) {
+  const a = td.prev ? `${Math.round(td.prev.nm)} NM after ${td.prev.name}` : "";
+  const b = td.next ? `${Math.round(td.next.nm)} NM before ${td.next.name}` : "";
+  return a && b ? `${a} (${b})` : a || b;
 }
 
 /** Card 3: the 4 wind levels (manual entry table or datalink request). */
@@ -2038,6 +2120,7 @@ async function importOFP(file) {
     if (o.ff) $("ff").value = o.ff;
     if (o.p2) $("p2").value = o.p2;
     if (o.p4) $("p4").value = o.p4;
+    if (o.destElev != null) $("delev").value = o.destElev;
 
     // Keep the OFP data for the comparison, the flight log and the hazards table.
     const lvTxt = ofpChanges(o.levels).map((q, i) => "FL" + q.fl + (i && q.fix ? " (" + q.fix + ")" : "")).join(" → ");
@@ -2048,7 +2131,7 @@ async function importOFP(file) {
     saveInputs();
 
     msg.className = "msg ok";
-    msg.textContent = `OFP ${o.orig || ""}→${o.dest || ""}: ${o.waypoints.length} fixes, ETD ${o.etd ? o.etd.toISOString().slice(11, 16) + "Z" : "?"}, ${(o.type || "").toUpperCase()}, TOW ${o.tow ? (o.tow / 1000).toFixed(1) + " t" : "?"}, CI ${o.ci ?? "?"}, M${o.mach || "?"}, FF ${o.ff || "?"} kg/h, penalties ${o.p2 || "?"}% / ${o.p4 || "?"}%, trip ${o.trip ? kg(o.trip) + " kg" : "?"}.\nOFP levels: ${lvTxt}.\nStill needed: OPT and REC MAX at TOW from the FMS (no winds).`;
+    msg.textContent = `OFP ${o.orig || ""}→${o.dest || ""}: ${o.waypoints.length} fixes, ETD ${o.etd ? o.etd.toISOString().slice(11, 16) + "Z" : "?"}, ${(o.type || "").toUpperCase()}, TOW ${o.tow ? (o.tow / 1000).toFixed(1) + " t" : "?"}, CI ${o.ci ?? "?"}, M${o.mach || "?"}, FF ${o.ff || "?"} kg/h, penalties ${o.p2 || "?"}% / ${o.p4 || "?"}%${o.bias != null ? `, fuel bias ${o.bias > 0 ? "+" : ""}${o.bias}%` : ""}${o.destElev != null ? `, ${o.dest} elevation ${o.destElev} ft` : ""}, trip ${o.trip ? kg(o.trip) + " kg" : "?"}.\nOFP levels: ${lvTxt}.\nStill needed: OPT and REC MAX at TOW from the FMS (no winds).`;
   } catch (e) {
     msg.className = "msg err";
     msg.textContent = "Couldn't read the OFP: " + (e.message || e) + ". You can still paste the route.";
@@ -2119,6 +2202,9 @@ function renderLog() {
   const fob = (burnt) => tof != null ? (tof - burnt) / 1000 : null;        // tonnes on board
   const ft = (x) => x == null ? "—" : x.toFixed(1);
 
+  const td = tdInfo(S, c, r, path);
+  const tdRow = td ? `<tr style="background:rgba(57,197,207,.10)"><td><b>T/D</b><div class="note" style="font-size:10px">${Math.round(td.cum)} NM · ${Math.round(td.toGo)} to go</div></td>
+<td><b>${hhmm(tot + td.t)}</b></td><td class="mut">—</td><td></td><td><b>${ft(fob(td.f))}</b></td><td class="mut">—</td><td></td><td class="note" style="font-size:10px">${tdWhere(td)}</td></tr>` : "";
   const rows = r.bad
     ? `<tr><td colspan="9">This profile doesn't fit the route.</td></tr>`
     : pts.map((s) => {
@@ -2134,7 +2220,9 @@ function renderLog() {
 <td><input class="li" data-k="ata" value="${A.ata || ""}" placeholder="hh:mm" inputmode="numeric"></td>
 <td>${ft(toolFob)}</td><td class="mut">${ft(ofpFob)}</td>
 <td><input class="li" data-k="fob" value="${A.fob || ""}" placeholder="t" inputmode="decimal"></td>
-<td class="dl" data-ta="${toolTime}" data-fa="${toolFob ?? ""}" data-ot="${ofpTime ?? ""}" data-of="${ofpFob ?? ""}"></td></tr>`;
+<td class="dl" data-ta="${toolTime}" data-fa="${toolFob ?? ""}" data-ot="${ofpTime ?? ""}" data-of="${ofpFob ?? ""}"></td></tr>`
+        // T/D row goes after the last fix before it.
+        + (td && s === pts.filter((q) => q.cum <= td.cum).pop() ? tdRow : "");
     }).join("");
 
   const lastPt = pts[pts.length - 1];
@@ -2282,7 +2370,7 @@ $("actype").addEventListener("change", () => {
 });
 
 // These settings recalculate immediately.
-["model", "perf", "recsrc", "pfac", "ci", "stepc", "minstep", "recm"].forEach((id) =>
+["model", "perf", "recsrc", "pfac", "delev", "desf", "ci", "stepc", "minstep", "recm"].forEach((id) =>
   $(id).addEventListener("change", () => { saveInputs(); rerender(); }));
 
 $("ofpfile").addEventListener("change", (e) => {
@@ -2316,6 +2404,21 @@ $("tblfile").addEventListener("change", async (e) => {
     $("tblmsg").innerHTML = `<span class="err">Couldn't load the tables: ${err.message}</span>`;
   }
 });
+
+// Reset: every setting, the OFP, forecast, flight log and per-type corrections,
+// plus the offline cache (so the newest app files load). FCOM tables stay.
+$("resetall").onclick = async () => {
+  if (!confirm("Reset all settings, the OFP, the forecast and the flight log?\nYour FCOM tables stay loaded.")) return;
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith("optfl.") && k != "optfl.tables")
+      .forEach((k) => localStorage.removeItem(k));
+  } catch (ignored) {}
+  try {
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  } catch (ignored) {}
+  location.reload();
+};
 
 $("tblclear").onclick = () => {
   TABLES = {};

@@ -49,8 +49,13 @@ export function parseOFP(lines){
     o.etd = new Date(Date.UTC(+m[3], mon, +m[1], +m[6], +m[7]));
     o.orig = m[4]; o.dest = m[5];
   }
-  if ((m = txt.match(/\b(A32[01])-(\d{3}N?)\b/))){
-    const neo = /PW11\d\d|LEAP-?1A|\bNEO\b/i.test(txt) || /N$/.test(m[2]) || /^2[57]1/.test(m[2]) && /PW11|LEAP/.test(txt);
+  /* aircraft type from the header line, e.g. "A320-232/V2527-A5" or "A320-271N/PW1127G".
+     Only the type/engine on that line count: the briefing pages mention NEO/CEO anyway. */
+  if ((m = txt.match(/\b(A32[01])-(\d{3}N?)(?:[\/ ]+(\S+))?/))){
+    const eng = m[3] || "";
+    const neo = /^(PW11|LEAP)/i.test(eng) ? true
+              : /^(V25|CFM56)/i.test(eng) ? false
+              : /N$/.test(m[2]) || /^2[57]\d/.test(m[2]);
     o.type = m[1].toLowerCase() + (neo ? "neo" : "ceo");
   }
   if ((m = txt.match(/CRZ\s+(?:SYS\s+)?CI\s+(\d+)/)) || (m = txt.match(/\bCI\s+(\d{1,3})\b/))) o.ci = +m[1];
@@ -59,6 +64,7 @@ export function parseOFP(lines){
   if ((m = txt.match(/\bTRIP\s+[A-Z]{4}\s+(\d{4,6})\s+(\d{4})/))){ o.trip = +m[1]; o.tripTime = m[2]; }
   const imp = re => { const r = txt.match(re); return r ? +r[1] : null; };
   o.dn2 = imp(/FL DN 2000 FT TRIP\s*\+\s*(\d+)/); o.dn4 = imp(/FL DN 4000 FT TRIP\s*\+\s*(\d+)/); o.up2 = imp(/FL UP 2000 FT TRIP\s*\+\s*(\d+)/);
+  if ((m = txt.match(/FUEL BIAS\s+([PM])(\d+(?:\.\d+)?)/))) o.bias = (m[1]=="M"?-1:1)*+m[2];
   if ((m = txt.match(/AVG ISA DEV\s+([PM])(\d+)/))) o.isa = (m[1]=="M"?-1:1)*+m[2];
 
   /* primary navigation log: from the first coordinate line to the destination */
@@ -89,6 +95,10 @@ export function parseOFP(lines){
     if (fl !== null) o.levels.push({name, fl});
     const t3 = (lines[i+2] || "").split(" ");
     for (let k = 0; k < t3.length - 1; k++) if (/^[+-]\d{2}$/.test(t3[k]) && /^\d{3}$/.test(t3[k+1]) && +t3[k+1] >= 600 && +t3[k+1] < 900) machs.push(+t3[k+1]);
+    /* airport elevation: "ELEV 3152FT" on the line under the airport */
+    const ev = (lines[i+1] || "").match(/ELEV\s+(-?\d+)\s*FT/);
+    if (ev && name === o.orig) o.origElev = +ev[1];
+    if (ev && name === o.dest) o.destElev = +ev[1];
     if (o.dest && name === o.dest) break;
   }
   if (machs.length){ const c = {}; machs.forEach(v => c[v] = (c[v]||0) + 1); o.mach = +Object.entries(c).sort((a,b)=>b[1]-a[1])[0][0] / 1000; }

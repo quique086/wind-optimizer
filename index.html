@@ -92,6 +92,8 @@ table.log td{vertical-align:top}
 <div class="grid">
 <div><label>Average cruise FF (kg/h)</label><input id="ff" type="number" step="50" value="2400"></div>
 <div><label>Climb table scale (%)</label><input id="clf" type="number" step="5" value="100"></div>
+<div><label>Descent distance (% of the tables or FCOM; 100 = as calibrated)</label><input id="desf" type="number" step="5" value="100"></div>
+<div><label>Destination elevation (ft)</label><input id="delev" type="number" step="100" value="0"></div>
 <div><label>Perf factor / fuel bias (%, FCOM tables)</label><input id="pfac" type="number" step="0.5" value="0"></div>
 <div><label>Climb fuel correction at FL350 (kg, this type)</label><input id="clcorr" type="number" step="50" value="0"></div>
 <div><label>Penalty 2000 ft off OPT (%)</label><input id="p2" type="number" step="0.1" value="2"></div>
@@ -103,6 +105,7 @@ table.log td{vertical-align:top}
 <label class="file">Load tables file (.json)<input id="tblfile" type="file" accept=".json,application/json"></label>
 <div id="tblmsg" class="note"></div>
 <button class="sec" id="tblclear">Remove tables</button>
+<button class="sec" id="resetall" style="margin-top:10px;border-color:var(--rd);color:var(--rd)">Reset everything</button>
 <div class="note">"OPT at TOW, no wind" and "REC MAX at TOW": read them on the FMS (PROG) with the takeoff weight in INIT B and before entering any winds. OPT and REC MAX then rise as fuel burns, at constant weight/pressure ratio.</div>
 </details>
 <div class="row"><button id="go">Get winds &amp; calculate</button><button class="sec" id="reuse">Recalculate</button></div>
@@ -125,6 +128,6 @@ table.log td{vertical-align:top}
 <b>Limits.</b> Planning cross-check, not certified performance data, and not an approved EFB application. The FMS, OFP, ATC and REC MAX/buffet margins always govern.
 </div>
 </main>
-<script src="app.js?v=2.13"></script>
+<script src="app.js?v=2.17"></script>
 </body>
 </html>

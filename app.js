@@ -49,7 +49,7 @@
  * ========================================================================== */
 
 /** App version, shown in the title and used to force browsers to load new files. */
-const APPV = "2.20";
+const APPV = "2.21";
 
 /** Shows an error message in the status line under the "Get winds" button. */
 function showErr(message) {
@@ -676,7 +676,8 @@ function windBand(S, s0, s1, ft0, ft1, src) {
  *              × (1 + off-OPT penalty for the current weight)
  *              × (TAS / route-average TAS at OPT)
  *       fuel = FF × distance / GS, and the weight drops by that fuel.
- *   - Each step climb costs c.stepc kg per 1000 ft.
+ *   - Each step climb costs stepFuelKg(): from the FCOM climb table when loaded,
+ *     otherwise c.stepc kg per 1000 ft.
  *
  * Returns (or { bad: true } if the route is too short for this level):
  *   fuel, time, cost (= fuel + CI × minutes), cruise figures (cfuel, ctime, cgs, cdist),
@@ -724,7 +725,7 @@ function sim(S, c, path, opt = {}) {
       // Level change: a climb costs fuel, a descent is free.
       if (prevFL !== null && fl !== prevFL) {
         if (fl > prevFL) {
-          const stepFuel = c.stepc * (fl - prevFL) / 10 * cal;
+          const stepFuel = stepFuelKg(c, prevFL, fl, weight) * cal;
           fuel += stepFuel;
           weight -= stepFuel;
         }
@@ -930,6 +931,27 @@ function pieceFuel(c, fl, weight, tas, hours, cal, pen, tasRef, midWeight) {
   }
   const ff = c.ff * cal * (weight / midWeight);
   return ff * (1 + pen((fl - optAt(weight, c)) / 10)) * (tas / tasRef) * hours;
+}
+
+/**
+ * Extra fuel (kg, before the perf factor) of a step climb from FL `from` to FL `to`
+ * at weight w (kg). With FCOM climb and cruise tables: the climb fuel between the
+ * two levels (table at this weight and the climb temperature) minus the cruise fuel
+ * the aircraft would have burned anyway over the extra distance covered in the climb.
+ * Without tables: the "Step climb cost" setting (kg per 1000 ft).
+ */
+function stepFuelKg(c, from, to, w) {
+  if (to <= from) return 0;
+  const T = tablesFor(c);
+  if (!(T && T.climb && T.cruise && T.cruise.sets)) return c.stepc * (to - from) / 10;
+  const wt = w / 1000, isa = c.isaDev || 0;
+  const cl = (fl, k) => lookupT(T.climb, k, fl, wt, isa, true);
+  const dF = cl(to, "f") - cl(from, "f");
+  const dD = cl(to, "d") - cl(from, "d");
+  // Cruise fuel per NM at the lower level, this weight and temperature (still air).
+  const tas = (T.cruise.mach || c.mach) * SOUND_K * Math.sqrt(isaT(from * 100) + isa + 273.15);
+  const perNM = lookupT(T.cruise, "ff", from, wt, isa, false) / tas;
+  return Math.max(0, dF - dD * perNM);
 }
 
 /** Which phases come from FCOM tables, for the notes on screen. */
@@ -1258,7 +1280,7 @@ function stepPlan(S, c, base, levels) {
       levels.forEach((P, i) => {
         if (dp[k - 1][i] === Infinity) return;
         // Step climb costs fuel; a step down gets a tiny cost so it isn't chosen for nothing.
-        const transition = L > P ? c.stepc * (L - P) / 10 * c.cal : (L < P ? 5 : 0);
+        const transition = L > P ? stepFuelKg(c, P, L, weightAt(segs[k].a)) * c.cal : (L < P ? 5 : 0);
         const v = dp[k - 1][i] + transition + cost[k][j];
         if (v < dp[k][j]) { dp[k][j] = v; back[k][j] = i; }
       });
@@ -1721,7 +1743,7 @@ ${changes.map((q, i) => {
     const next = changes[i + 1];
     return `<tr class="${i > 0 ? "best" : ""}"><td>${i == 0 ? "Initial" : "At " + sp.segs[q.k].name}</td><td>FL${q.L}</td><td>${next ? sp.segs[next.k].name : "T/D"}</td></tr>`;
   }).join("")}</table></div>
-<p style="font-size:13px">Saves ≈<b>${kg(sp.saving)} kg</b>${c.ci ? " (cost units)" : ""} against FL${bestF.fl} all the way, after ${c.stepc} kg per 1000 ft of step climb.</p>`
+<p style="font-size:13px">Saves ≈<b>${kg(sp.saving)} kg</b>${c.ci ? " (cost units)" : ""} against FL${bestF.fl} all the way, after ${tablesFor(c) && tablesFor(c).climb && tablesFor(c).cruise && tablesFor(c).cruise.sets ? `the FCOM step-climb cost (≈${kg(stepFuelKg(c, bestF.fl, bestF.fl + 20, c.tow * 1000 - 3000) / 2)} kg per 1000 ft here)` : `${c.stepc} kg per 1000 ft of step climb`}.</p>`
     : `<p style="font-size:13px">No step worth requesting: <b>FL${bestF.fl}</b> all the way${changes.length > 1 && sp.saving != null && sp.saving > 0 ? ` (best step plan saves only ${kg(sp.saving)} kg)` : ""}.</p>`;
 
   return `<div class="card"><h2>Step plan</h2>${body}
